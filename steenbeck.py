@@ -10,7 +10,11 @@ import pprint
 import argparse
 from python_get_resolve import GetResolve
 
-def lcs_algo(S1, S2, m, n):
+def longestcommonsub(S1, S2):
+    m = len(S1)
+    n = len(S2)
+
+    # TODO: trim common ends and beginnings
     L = [[0 for x in range(n+1)] for x in range(m+1)]
 
     # Building the mtrix in bottom-up way
@@ -90,7 +94,6 @@ fromTimeline, toTimeline = GetTimelines(resolve)
 if fromTimeline.GetStartFrame() != toTimeline.GetStartFrame():
     raise Exception("differing start frames")
 
-
 # run through every frame of the video, creating a hash of the current frame
 # properties. This is horribly inefficient, but the alternative
 # is to actually do the maths for insertion and doing "data structures"
@@ -109,15 +112,47 @@ def calculateFrameSeq(items):
         # important when we have to work with titles, which will change text
         name = i.GetName()
         startframe = i.GetSourceStartFrame()
-        endframe = i.GetSourceEndFrame()
-        for r in range(startframe,endframe+1):
-            m = (name,r)
-            frames.append(hash(m))
+        endframe = startframe + i.GetDuration()
+        # davinci will return 0 for both the first frame of the source
+        # and the frame after that. This makes the frame math infuriatingly
+        # special cased. The way to determine if we're inserting from the first
+        # frame is to see if we have any offset available on the left. This
+        # might be bounded by a transition overlay, but for here, we can
+        # assume that no one is doing transitions on the absolutely first frame
+        # on of a clip
+        if startframe != 0 or i.GetLeftOffset(False) != 0:
+            startframe += 1
+            endframe += 1
+
+        for r in range(startframe,endframe):
+            #TODO(dmo): make this a hash of relevant values
+            frames.append((name,r))
+
     return frames
 
 fromFrames = calculateFrameSeq(fromitems)
 toFrames = calculateFrameSeq(toitems)
-lcs = lcs_algo(fromFrames, toFrames, len(fromFrames), len(toFrames))
+lcs = longestcommonsub(fromFrames, toFrames)
+
+s, i, j = 0, 0, 0
+
+while s < len(lcs) and i < len(fromFrames) and j < len(toFrames):
+    if lcs[s] != toFrames[j]:
+        # insertion
+        oldj = j
+        while lcs[s] != toFrames[j]:
+            j += 1
+        print("insertion at frame {} length {}".format(s, j-oldj))
+    elif lcs[s] != fromFrames[i]:
+        # deletion
+        oldi = i
+        while lcs[s] != fromFrames[i]:
+            i += 1
+        print("deletion at frame {} length {}".format(s, i-oldi))
+    else:
+        s += 1
+        i += 1
+        j += 1
 
 
 command = [
