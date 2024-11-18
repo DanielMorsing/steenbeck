@@ -10,6 +10,40 @@ import pprint
 import argparse
 from python_get_resolve import GetResolve
 
+def lcs_algo(S1, S2, m, n):
+    L = [[0 for x in range(n+1)] for x in range(m+1)]
+
+    # Building the mtrix in bottom-up way
+    for i in range(m+1):
+        for j in range(n+1):
+            if i == 0 or j == 0:
+                L[i][j] = 0
+            elif S1[i-1] == S2[j-1]:
+                L[i][j] = L[i-1][j-1] + 1
+            else:
+                L[i][j] = max(L[i-1][j], L[i][j-1])
+
+    index = L[m][n]
+
+    lcs_algo = [None] * (index)
+
+    i = m
+    j = n
+    while i > 0 and j > 0:
+
+        if S1[i-1] == S2[j-1]:
+            lcs_algo[index-1] = S1[i-1]
+            i -= 1
+            j -= 1
+            index -= 1
+
+        elif L[i-1][j] > L[i][j-1]:
+            i -= 1
+        else:
+            j -= 1
+            
+    return lcs_algo
+
 def FindTimeline(project):
     cnt = project.GetTimelineCount()
     for i in range(1, cnt+1):
@@ -65,20 +99,25 @@ if fromTimeline.GetStartFrame() != toTimeline.GetStartFrame():
 fromitems = fromTimeline.GetItemListInTrack('video', 1)
 toitems = toTimeline.GetItemListInTrack('video', 1)
 
-fromFrames = []
+def calculateFrameSeq(items):
+    frames = []
+    for i in items:
+        # TODO(dmo): when we make this work for multiple tracks, this
+        # obviously has to change. It is not guaranteed to be contiguous over
+        # every frame
+        # also, we need to look at file properties. this will especially become
+        # important when we have to work with titles, which will change text
+        name = i.GetName()
+        startframe = i.GetSourceStartFrame()
+        endframe = i.GetSourceEndFrame()
+        for r in range(startframe,endframe+1):
+            m = (name,r)
+            frames.append(hash(m))
+    return frames
 
-for i in fromitems:
-    # TODO(dmo): when we make this work for multiple tracks, this
-    # obviously has to change. It is not guaranteed to be contiguous over
-    # every frame
-    # also, we need to look at file properties. this will especially become
-    # important when we have to work with titles, which will change text
-    n = i.GetName()
-    s = i.GetStart()
-    e = i.GetEnd()
-    for r in range(s,e):
-        m = (n,r)
-        fromFrames.append(hash(m))
+fromFrames = calculateFrameSeq(fromitems)
+toFrames = calculateFrameSeq(toitems)
+lcs = lcs_algo(fromFrames, toFrames, len(fromFrames), len(toFrames))
 
 
 command = [
