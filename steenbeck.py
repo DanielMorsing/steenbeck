@@ -58,12 +58,14 @@ def FindTimeline(project):
     raise Exception("Could not find timeline {}".format(args.t))
 
 
-def GetTimelines( resolve ):
-    projectManager = resolve.GetProjectManager()
-    project = projectManager.GetCurrentProject()
+def GetTimelines( project ):
     fromTl = FindTimeline(project)
     toTl = project.GetCurrentTimeline()
     return fromTl, toTl
+
+def GetProject( resolve ):
+    projectManager = resolve.GetProjectManager()
+    return projectManager.GetCurrentProject()
 
 def FindKeyframe(frames):
     for i in frames:
@@ -88,8 +90,8 @@ parser.add_argument('-o')
 args = parser.parse_args()
 
 resolve = GetResolve()
-
-fromTimeline, toTimeline = GetTimelines(resolve)
+project = GetProject(resolve)
+fromTimeline, toTimeline = GetTimelines(project)
 
 if fromTimeline.GetStartFrame() != toTimeline.GetStartFrame():
     raise Exception("differing start frames")
@@ -111,22 +113,29 @@ def calculateFrameSeq(items):
         # also, we need to look at file properties. this will especially become
         # important when we have to work with titles, which will change text
         name = i.GetName()
-        startframe = i.GetSourceStartFrame()
-        endframe = startframe + i.GetDuration()
+        start = i.GetStart()
+        end = i.GetEnd()
+        # this is not robust in the face of time stretching.
+        # Thankfully this is only relevant if someone were to change the speed
+        # of a clip.
+        # TODO(dmo): figure out what this looks like for source clips
+        # with a different framerate than the timeline
+        sourcestartframe = i.GetSourceStartFrame()
         # davinci will return 0 for both the first frame of the source
         # and the frame after that. This makes the frame math infuriatingly
         # special cased. The way to determine if we're inserting from the first
         # frame is to see if we have any offset available on the left. This
-        # might be bounded by a transition overlay, but for here, we can
+        # might be bounded by a transition overlay, but for this case, we can
         # assume that no one is doing transitions on the absolutely first frame
         # on of a clip
-        if startframe != 0 or i.GetLeftOffset(False) != 0:
-            startframe += 1
-            endframe += 1
+        if sourcestartframe == 0 and i.GetLeftOffset(False) != 0:
+            sourcestartframe += 1
 
-        for r in range(startframe,endframe):
+        i = sourcestartframe
+        for r in range(start,end):
             #TODO(dmo): make this a hash of relevant values
-            frames.append((name,r))
+            frames.append((name,i))
+            i += 1
 
     return frames
 
@@ -136,24 +145,32 @@ lcs = longestcommonsub(fromFrames, toFrames)
 
 s, i, j = 0, 0, 0
 
+inserts = []
+deletes = []
+
 while s < len(lcs) and i < len(fromFrames) and j < len(toFrames):
     if lcs[s] != toFrames[j]:
         # insertion
         oldj = j
         while lcs[s] != toFrames[j]:
             j += 1
-        print("insertion at frame {} length {}".format(s, j-oldj))
+        inserts.append((i, j-oldj))
     elif lcs[s] != fromFrames[i]:
         # deletion
         oldi = i
         while lcs[s] != fromFrames[i]:
             i += 1
-        print("deletion at frame {} length {}".format(s, i-oldi))
+        deletes.append((oldi, i-oldi))
     else:
         s += 1
         i += 1
         j += 1
 
+# TODO(dmo): this only does a single insert for now
+framerate = toTimeline.GetSetting("timelineFrameRate")
+(framenum, insertlen) = inserts[0]
+second = framenum/framerate
+intervalstr = "{}%+#100".format(second)
 
 command = [
     "./ffprobe.exe",
@@ -161,7 +178,7 @@ command = [
     "-select_streams", "v:0",
     "-show_streams",
     "-show_packets",
-    "-read_intervals", "00:04.99%+#100", # TODO(dmo): replace with format
+    "-read_intervals", intervalstr, # TODO(dmo): replace with format
     "-i", args.f
 ]
 res = subprocess.run(command, capture_output=True)
@@ -180,9 +197,32 @@ if int(q) != 1:
     raise Exception("I will figure out NTSC video later")
 framerate = int(d)
 
+renderentry = PtsToFramenum(timebase, framerate, gopentry["pts"])
+renderexit = PtsToFramenum(timebase, framerate, gopexit["pts"])
+renderexit += insertlen
+print(renderentry, renderexit)
 
-# pprint.pp(stream)
-print(gopentry)
-print(PtsToFramenum(timebase, framerate, gopentry["pts"]))
-print(gopexit)
-print(PtsToFramenum(timebase, framerate, gopexit["pts"]))
+# look for the latest render job that matches the video file
+# that matches the to file
+def findRender(renders):
+    for r in reversed(renders):
+        if r["TargetDir"] + '\\' + r["OutputFilename"] == args.f:
+            return r
+        
+    raise Exception("couldn't find template render")
+
+templateRender = findRender(project.GetRenderJobList())
+rendersettings = {
+    "IsExportAudio": False,
+    "FormatWidth": templateRender["FormatWidth"],
+    "FormatHeight": templateRender["FormatHeight"],
+    "MarkIn": fromTimeline.GetStartFrame() + renderentry,
+    "MarkOut": fromTimeline.GetStartFrame() + (renderexit-1),
+    #TODO(dmo): figure out what to do here
+    'TargetDir': 'C:\\Users\\danie\\Videos\\splicetests',
+    'CustomName': 'glue.mov'
+}
+project.SetRenderSettings(rendersettings)
+job = project.AddRenderJob()
+project.StartRendering(job)
+pprint.pp(job)
