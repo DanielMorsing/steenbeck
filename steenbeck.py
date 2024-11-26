@@ -143,64 +143,181 @@ fromFrames = calculateFrameSeq(fromitems)
 toFrames = calculateFrameSeq(toitems)
 lcs = longestcommonsub(fromFrames, toFrames)
 
+# turn out LCS into a list of segments. These segments
+# are either "from" or "to" segments.
+# for from segments, we use the frame number 0 indexed of the
+# video file on disk
+#
+# for to segments, we use the frame number of the timeline we read
+# from resolve
+class segment:
+    def __init__(self, src, startframe, duration):
+        self.src = src
+        self.startframe = startframe
+        self.duration = duration
+
+
+segments = []
+fromptr = 0
 s, i, j = 0, 0, 0
-
-inserts = []
-deletes = []
-
 while s < len(lcs) and i < len(fromFrames) and j < len(toFrames):
     if lcs[s] != toFrames[j]:
-        # insertion
+        # insertion, emit a "from" segment, unless we are at the start
+        # of the video
+        if i != 0:
+            segments.append(segment("From", fromptr, i-fromptr))
+        
         oldj = j
         while lcs[s] != toFrames[j]:
             j += 1
-        inserts.append((i, j-oldj))
+        segments.append(segment("To", oldj, j-oldj))
+        fromptr = i
     elif lcs[s] != fromFrames[i]:
-        # deletion
-        oldi = i
+        # deletion, emit a "from" section for up until the delete
+        # sequence
+        if i != 0:
+            segments.append(segment("From", fromptr, i-fromptr))
         while lcs[s] != fromFrames[i]:
             i += 1
-        deletes.append((oldi, i-oldi))
+        fromptr = i
+        
     else:
         s += 1
         i += 1
         j += 1
 
-# TODO(dmo): this only does a single insert for now
-framerate = toTimeline.GetSetting("timelineFrameRate")
-(framenum, insertlen) = inserts[0]
-second = framenum/framerate
-intervalstr = "{}%+#100".format(second)
+# after the loop, if we match on the ending segment,
+# emit it
+if lcs[s-1] == fromFrames[i-1] == toFrames[j-1]:
+    segments.append(segment("From", fromptr, i-fromptr))
 
+# figure out which keyframes we need to find, either before or after
+# a given point
+prevIDR = {}
+nextIDR = {}
+for i in range(len(segments)):
+    s = segments[i]
+    if s.src == "From":
+        if s.startframe != 0:
+            prevIDR[s.startframe] = True
+    elif s.src == "To":
+        if i != 0:
+            prev = segments[i-1]
+            pi = prev.startframe + prev.duration
+            prevIDR[pi] = True
+            if prev.src == "To":
+                raise Exception("should not ever get 2 To segments next to eachother")
+
+        nexts = segments[i+1]
+        if nexts.src == "To":
+            raise Exception("should not ever get 2 To segments next to eachother")
+        nextIDR[nexts.startframe] = True
+
+# construct an interval string for ffmpeg.
+# Seeking will give us the first keyframe previous to the seek point
+# 100 frames after is a guess for when we will see a keyframe again
+framerate = toTimeline.GetSetting("timelineFrameRate")
+intervals = []
+for i in prevIDR:
+    second = i/framerate
+    intervals.append("{}%+#100".format(second))
+for i in nextIDR:
+    second = i/framerate
+    intervals.append("{}%+#100".format(second))
+intervalstr = ",".join(intervals)
+
+# invoke ffmpeg and have it give us the frames that
 command = [
     "./ffprobe.exe",
     "-print_format", "json",
     "-select_streams", "v:0",
     "-show_streams",
     "-show_packets",
-    "-read_intervals", intervalstr, # TODO(dmo): replace with format
+    "-read_intervals", intervalstr,
     "-i", args.f
 ]
 res = subprocess.run(command, capture_output=True)
 ffprobeoutput = json.loads(res.stdout)
-gopentry = ffprobeoutput["packets"][0]
-gopexit = FindKeyframe(ffprobeoutput["packets"][1:])
+packets = ffprobeoutput["packets"]
 stream = ffprobeoutput["streams"][0]
 
+# dedupe, sort by pts
+bypts = {}
+for i in packets:
+    bypts[i["pts"]] = i
+packets = sorted(list(bypts.values()), key=lambda x: x["pts"])
+
+# find the timebase, we use this to go from frame numbers to identifying packets
 d, q = stream["time_base"].split('/')
 if int(d) != 1:
     raise Exception("life is too short to do timebase math for a silly optimization")
 timebase = int(q)
 
+# grab the framerate, we will use this later for NTSC
 d, q = stream["avg_frame_rate"].split('/')
 if int(q) != 1:
     raise Exception("I will figure out NTSC video later")
 framerate = int(d)
 
-renderentry = PtsToFramenum(timebase, framerate, gopentry["pts"])
-renderexit = PtsToFramenum(timebase, framerate, gopexit["pts"])
-renderexit += insertlen
-print(renderentry, renderexit)
+# find all the keyframes that we need before a given point
+# TODO(dmo): clean up, this is ugly
+ptsperframe = timebase/framerate
+for pi in prevIDR:
+    ptstofind = pi * ptsperframe
+    # TODO(dmo): could do binary search or something
+    for i, p in enumerate(packets):
+        if p["pts"] == ptstofind:
+            for j in reversed(range(i)):
+                if packets[j]["flags"] == "K__":
+                    prevIDR[pi] = packets[j]["pts"]/ptsperframe
+                    break
+            break
+
+for ni in nextIDR:
+    ptstofind = pi * ptsperframe
+    for i, p in enumerate(packets):
+        if p["pts"] == ptstofind:
+            for j in range(i, len(packets)):
+                if packets[j]["flags"] == "K__":
+                    nextIDR[ni] = packets[j]["pts"]/ptsperframe
+                    break
+            break
+
+print("before")
+for s in segments:
+    print(s.src, s.startframe, s.duration)
+
+print()
+
+# nudge the in and out points of all of our segments
+# based on the data we found from ffmpeg
+for i, s in enumerate(segments):
+    if s.src == "To":
+        sf = s.startframe
+        innudge = sf - prevIDR[sf]
+        s.startframe -= innudge
+        s.duration += innudge
+        segments[i-1].duration -= innudge
+
+        nextseg = segments[i+1]
+        outnudge = nextIDR[nextseg.startframe] - nextseg.startframe
+        s.duration += outnudge
+        nextseg.startframe += outnudge
+        nextseg.duration -= outnudge
+
+print("after")
+for s in segments:
+    print(s.src, s.startframe, s.duration)
+
+# consistency check
+length = 0
+for s in segments:
+    if s.startframe < 0 or s.duration < 0:
+        raise Exception("overlapping segments, contact developer")
+    length += s.duration
+
+if length != toTimeline.GetEndFrame() - toTimeline.GetStartFrame():
+    raise Exception("made a sequence that is not same length as intended result, contact developer")
 
 # look for the latest render job that matches the video file
 # that matches the to file
@@ -216,8 +333,8 @@ rendersettings = {
     "IsExportAudio": False,
     "FormatWidth": templateRender["FormatWidth"],
     "FormatHeight": templateRender["FormatHeight"],
-    "MarkIn": fromTimeline.GetStartFrame() + renderentry,
-    "MarkOut": fromTimeline.GetStartFrame() + (renderexit-1),
+#    "MarkIn": fromTimeline.GetStartFrame() + renderentry,
+#    "MarkOut": fromTimeline.GetStartFrame() + (renderexit-1),
     #TODO(dmo): figure out where to store this temporary file
     'TargetDir': 'C:\\Users\\danie\\Videos\\splicetests',
     'CustomName': 'glue.mov'
@@ -225,4 +342,4 @@ rendersettings = {
 project.SetRenderSettings(rendersettings)
 job = project.AddRenderJob()
 project.StartRendering(job)
-pprint.pp(job)
+
