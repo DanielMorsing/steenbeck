@@ -218,7 +218,7 @@ rendersettings = {
     "FormatHeight": templateRender["FormatHeight"],
     "MarkIn": fromTimeline.GetStartFrame() + renderentry,
     "MarkOut": fromTimeline.GetStartFrame() + (renderexit-1),
-    #TODO(dmo): figure out what to do here
+    #TODO(dmo): figure out where to store this temporary file
     'TargetDir': 'C:\\Users\\danie\\Videos\\splicetests',
     'CustomName': 'glue.mov'
 }

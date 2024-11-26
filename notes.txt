@@ -1,0 +1,7 @@
+notes
+
+concat
+./ffmpeg.exe -safe 0 -f concat -i splice.txt -c copy foobar.mp4
+
+regen stream with pts (this isn't needed anymore, the problem was I was seeking to non-I frames by accident)
+./ffmpeg.exe -fflags +genpts -r 25 -i foobar.h264 -c copy -aspect 16:9 -video_track_timescale 12800 fixed.mov
