@@ -372,6 +372,7 @@ with open(fileloc, "w") as splicefile:
     splicefile.write("\n".join(splicelines))
 command = [
     "./ffmpeg.exe",
+    "-y",
     "-safe", "0",
     "-f", "concat",
     "-i", fileloc,
