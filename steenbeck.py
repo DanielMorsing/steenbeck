@@ -148,32 +148,35 @@ lcs = longestcommonsub(originalFrames, targetFrames)
 # for target segments, we use the frame number of the timeline we read
 # from resolve
 class segment:
-    def __init__(self, src, startframe, duration):
-        self.src = src
+    def __init__(self, startframe, duration):
         self.startframe = startframe
         self.duration = duration
 
+class original(segment):
+    pass
+class target(segment):
+    pass
 
 segments = []
 origptr = 0
 s, i, j = 0, 0, 0
 while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
     if lcs[s] != targetFrames[j]:
-        # insertion, emit a "original" segment, unless we are at the start
+        # insertion, emit an "original" segment, unless we are at the start
         # of the video
         if i != 0:
-            segments.append(segment("From", origptr, i-origptr))
+            segments.append(original(origptr, i-origptr))
         
         oldj = j
         while lcs[s] != targetFrames[j]:
             j += 1
-        segments.append(segment("To", oldj, j-oldj))
+        segments.append(target(oldj, j-oldj))
         origptr = i
     elif lcs[s] != originalFrames[i]:
-        # deletion, emit a "from" section for up until the delete
+        # deletion, emit an "original" section for up until the delete
         # sequence
         if i != 0:
-            segments.append(segment("From", origptr, i-origptr))
+            segments.append(original(origptr, i-origptr))
         while lcs[s] != originalFrames[i]:
             i += 1
         origptr = i
@@ -186,7 +189,7 @@ while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
 # after the loop, if we match on the ending segment,
 # emit it
 if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
-    segments.append(segment("From", origptr, i-origptr))
+    segments.append(original(origptr, i-origptr))
 
 # figure out which keyframes we need to find, either before or after
 # a given point
@@ -194,17 +197,17 @@ prevIDR = {}
 nextIDR = {}
 for i in range(len(segments)):
     s = segments[i]
-    if s.src == "To":
+    if isinstance(s, target):
         if i != 0:
             prev = segments[i-1]
             pi = prev.startframe + prev.duration
             prevIDR[pi] = True
-            if prev.src == "To":
-                raise Exception("should not ever get 2 To segments next to eachother")
+            if isinstance(prev, target):
+                raise Exception("should not ever get 2 target segments next to eachother")
 
         nexts = segments[i+1]
-        if nexts.src == "To":
-            raise Exception("should not ever get 2 To segments next to eachother")
+        if isinstance(nexts, target):
+            raise Exception("should not ever get 2 target segments next to eachother")
         nextIDR[nexts.startframe] = True
 
 # construct an interval string for ffmpeg.
@@ -282,13 +285,13 @@ for ni in nextIDR:
 if args.debug:
     print("segment list before keyframe nudges")
     for s in segments:
-        print(s.src, s.startframe, s.duration)
+        print(s)
     print()
 
 # nudge the in and out points of all of our segments
 # based on the data we found from ffmpeg
 for i, s in enumerate(segments):
-    if s.src == "To":
+    if isinstance(s, target):
         sf = s.startframe
         innudge = sf - prevIDR[sf]
         s.startframe -= innudge
@@ -304,7 +307,8 @@ for i, s in enumerate(segments):
 if args.debug:
     print("segment list after keyframe nudges")
     for s in segments:
-        print(s.src, s.startframe, s.duration)
+        print(s)
+    print()
 
 # consistency check
 length = 0
@@ -328,7 +332,7 @@ def findRender(renders):
 templateRender = findRender(project.GetRenderJobList())
 jobs = []
 for i, s in enumerate(segments):
-    if s.src == "To":
+    if isinstance(s, target):
         rendersettings = {
             "IsExportAudio": False,
             "FormatWidth": templateRender["FormatWidth"],
@@ -356,7 +360,7 @@ for j in jobs:
 # generate file for ffmpeg concat demuxer
 splicelines = []
 for i, s in enumerate(segments):
-    if s.src == "From":
+    if isinstance(s, original):
         if s.duration == 0:
             continue
         splicelines.append(f"file '{args.f}'")
