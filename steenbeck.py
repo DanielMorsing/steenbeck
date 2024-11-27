@@ -175,6 +175,7 @@ while s < len(lcs) and i < len(fromFrames) and j < len(toFrames):
     elif lcs[s] != fromFrames[i]:
         # deletion, emit a "from" section for up until the delete
         # sequence
+        raise Exception("deletion not implemented yet")
         if i != 0:
             segments.append(segment("From", fromptr, i-fromptr))
         while lcs[s] != fromFrames[i]:
@@ -197,10 +198,7 @@ prevIDR = {}
 nextIDR = {}
 for i in range(len(segments)):
     s = segments[i]
-    if s.src == "From":
-        if s.startframe != 0:
-            prevIDR[s.startframe] = True
-    elif s.src == "To":
+    if s.src == "To":
         if i != 0:
             prev = segments[i-1]
             pi = prev.startframe + prev.duration
