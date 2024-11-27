@@ -63,9 +63,9 @@ def FindTimeline(project):
 
 
 def GetTimelines( project ):
-    fromTl = FindTimeline(project)
-    toTl = project.GetCurrentTimeline()
-    return fromTl, toTl
+    originalTl = FindTimeline(project)
+    targetTl = project.GetCurrentTimeline()
+    return originalTl, targetTl
 
 def GetProject( resolve ):
     projectManager = resolve.GetProjectManager()
@@ -88,9 +88,9 @@ args = parser.parse_args()
 
 resolve = GetResolve()
 project = GetProject(resolve)
-fromTimeline, toTimeline = GetTimelines(project)
+originalTimeline, targetTimeline = GetTimelines(project)
 
-if fromTimeline.GetStartFrame() != toTimeline.GetStartFrame():
+if originalTimeline.GetStartFrame() != targetTimeline.GetStartFrame():
     raise Exception("differing start frames")
 
 # run through every frame of the video, creating a hash of the current frame
@@ -98,8 +98,8 @@ if fromTimeline.GetStartFrame() != toTimeline.GetStartFrame():
 # is to actually do the maths for insertion and doing "data structures"
 # and "computer science". Life's too short
 # TODO(dmo): this is special cased to only handle one track right now
-fromitems = fromTimeline.GetItemListInTrack('video', 1)
-toitems = toTimeline.GetItemListInTrack('video', 1)
+originalitems = originalTimeline.GetItemListInTrack('video', 1)
+targetitems = targetTimeline.GetItemListInTrack('video', 1)
 
 def calculateFrameSeq(items):
     frames = []
@@ -136,16 +136,16 @@ def calculateFrameSeq(items):
 
     return frames
 
-fromFrames = calculateFrameSeq(fromitems)
-toFrames = calculateFrameSeq(toitems)
-lcs = longestcommonsub(fromFrames, toFrames)
+originalFrames = calculateFrameSeq(originalitems)
+targetFrames = calculateFrameSeq(targetitems)
+lcs = longestcommonsub(originalFrames, targetFrames)
 
 # turn out LCS into a list of segments. These segments
-# are either "from" or "to" segments.
-# for from segments, we use the frame number 0 indexed of the
+# are either "original" or "target" segments.
+# for original segments, we use the frame number, 0-indexed of the
 # video file on disk
 #
-# for to segments, we use the frame number of the timeline we read
+# for target segments, we use the frame number of the timeline we read
 # from resolve
 class segment:
     def __init__(self, src, startframe, duration):
@@ -155,29 +155,28 @@ class segment:
 
 
 segments = []
-fromptr = 0
+origptr = 0
 s, i, j = 0, 0, 0
-while s < len(lcs) and i < len(fromFrames) and j < len(toFrames):
-    if lcs[s] != toFrames[j]:
-        # insertion, emit a "from" segment, unless we are at the start
+while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
+    if lcs[s] != targetFrames[j]:
+        # insertion, emit a "original" segment, unless we are at the start
         # of the video
         if i != 0:
-            segments.append(segment("From", fromptr, i-fromptr))
+            segments.append(segment("From", origptr, i-origptr))
         
         oldj = j
-        while lcs[s] != toFrames[j]:
+        while lcs[s] != targetFrames[j]:
             j += 1
         segments.append(segment("To", oldj, j-oldj))
-        fromptr = i
-    elif lcs[s] != fromFrames[i]:
+        origptr = i
+    elif lcs[s] != originalFrames[i]:
         # deletion, emit a "from" section for up until the delete
         # sequence
-        raise Exception("deletion not implemented yet")
         if i != 0:
-            segments.append(segment("From", fromptr, i-fromptr))
-        while lcs[s] != fromFrames[i]:
+            segments.append(segment("From", origptr, i-origptr))
+        while lcs[s] != originalFrames[i]:
             i += 1
-        fromptr = i
+        origptr = i
         
     else:
         s += 1
@@ -186,8 +185,8 @@ while s < len(lcs) and i < len(fromFrames) and j < len(toFrames):
 
 # after the loop, if we match on the ending segment,
 # emit it
-if lcs[s-1] == fromFrames[i-1] == toFrames[j-1]:
-    segments.append(segment("From", fromptr, i-fromptr))
+if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
+    segments.append(segment("From", origptr, i-origptr))
 
 # figure out which keyframes we need to find, either before or after
 # a given point
@@ -211,7 +210,7 @@ for i in range(len(segments)):
 # construct an interval string for ffmpeg.
 # Seeking will give us the first keyframe previous to the seek point
 # 100 frames after is a guess for when we will see a keyframe again.
-framerate = toTimeline.GetSetting("timelineFrameRate")
+framerate = targetTimeline.GetSetting("timelineFrameRate")
 intervals = []
 for i in prevIDR:
     second = i/framerate
@@ -234,6 +233,7 @@ command = [
 res = subprocess.run(command, capture_output=True)
 ffprobeoutput = json.loads(res.stdout)
 packets = ffprobeoutput["packets"]
+# TODO(dmo): figure out more complex streams
 stream = ffprobeoutput["streams"][0]
 
 # dedupe all the packets, sort by presentation timestamp
@@ -313,7 +313,7 @@ for s in segments:
         raise Exception("overlapping segments, contact developer")
     length += s.duration
 
-if length != toTimeline.GetEndFrame() - toTimeline.GetStartFrame():
+if length != targetTimeline.GetEndFrame() - targetTimeline.GetStartFrame():
     raise Exception("made a sequence that is not same length as intended result, contact developer")
 
 # look for the latest render job that matches the video file
@@ -333,8 +333,8 @@ for i, s in enumerate(segments):
             "IsExportAudio": False,
             "FormatWidth": templateRender["FormatWidth"],
             "FormatHeight": templateRender["FormatHeight"],
-            "MarkIn": fromTimeline.GetStartFrame() + s.startframe,
-            "MarkOut": fromTimeline.GetStartFrame() + (s.startframe+s.duration)-1,
+            "MarkIn": originalTimeline.GetStartFrame() + s.startframe,
+            "MarkOut": originalTimeline.GetStartFrame() + (s.startframe+s.duration)-1,
             #TODO(dmo): figure out where to store this temporary file
             'TargetDir': TEMPDIR,
             'CustomName': f'glue{i}.mov'
