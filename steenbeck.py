@@ -10,14 +10,18 @@ import argparse
 import time
 from python_get_resolve import GetResolve
 
+#TODO(dmo): figure out what this temporary directory actually needs to be
+TEMPDIR = 'C:\\Users\\danie\\Videos\\splicetests\\temporaries'
+
+# compute the longest common subsequence. This will make it possible
+# for us to get the "diff" between the 2 timelines
 def longestcommonsub(S1, S2):
     m = len(S1)
     n = len(S2)
 
-    # TODO: trim common ends and beginnings
+    # TODO(dmo): trim common ends and beginnings
     L = [[0 for x in range(n+1)] for x in range(m+1)]
 
-    # Building the mtrix in bottom-up way
     for i in range(m+1):
         for j in range(n+1):
             if i == 0 or j == 0:
@@ -74,18 +78,11 @@ def FindKeyframe(frames):
     
     raise Exception("could not find keyframe")
 
-def PtsToFramenum(timebase, framerate, pts):
-    # ffmpeg doesn't support seeking by frame number, we only get presentation
-    # timestamps.
-    # davinci requires frame numbers to set the in and out points for renders.
-    # Luckily, we know that resolve doesn't support variable framerate timelines
-    # and that this file came out of resolve
-    return (pts/timebase)*framerate
-
 parser = argparse.ArgumentParser()
 parser.add_argument('-t')
 parser.add_argument('-f')
 parser.add_argument('-o')
+parser.add_argument('-debug', action='store_true')
 
 args = parser.parse_args()
 
@@ -213,7 +210,7 @@ for i in range(len(segments)):
 
 # construct an interval string for ffmpeg.
 # Seeking will give us the first keyframe previous to the seek point
-# 100 frames after is a guess for when we will see a keyframe again
+# 100 frames after is a guess for when we will see a keyframe again.
 framerate = toTimeline.GetSetting("timelineFrameRate")
 intervals = []
 for i in prevIDR:
@@ -239,13 +236,14 @@ ffprobeoutput = json.loads(res.stdout)
 packets = ffprobeoutput["packets"]
 stream = ffprobeoutput["streams"][0]
 
-# dedupe, sort by pts
+# dedupe all the packets, sort by presentation timestamp
 bypts = {}
 for i in packets:
     bypts[i["pts"]] = i
 packets = sorted(list(bypts.values()), key=lambda x: x["pts"])
 
-# find the timebase, we use this to go from frame numbers to identifying packets
+# find the timebase, we use this to go from davinci frame numbers to
+# ffmpeg packet timestamps
 d, q = stream["time_base"].split('/')
 if int(d) != 1:
     raise Exception("life is too short to do timebase math for a silly optimization")
@@ -281,11 +279,11 @@ for ni in nextIDR:
                     break
             break
 
-print("before")
-for s in segments:
-    print(s.src, s.startframe, s.duration)
-
-print()
+if args.debug:
+    print("segment list before keyframe nudges")
+    for s in segments:
+        print(s.src, s.startframe, s.duration)
+    print()
 
 # nudge the in and out points of all of our segments
 # based on the data we found from ffmpeg
@@ -303,9 +301,10 @@ for i, s in enumerate(segments):
         nextseg.startframe += outnudge
         nextseg.duration -= outnudge
 
-print("after")
-for s in segments:
-    print(s.src, s.startframe, s.duration)
+if args.debug:
+    print("segment list after keyframe nudges")
+    for s in segments:
+        print(s.src, s.startframe, s.duration)
 
 # consistency check
 length = 0
@@ -325,6 +324,7 @@ def findRender(renders):
         
     raise Exception("couldn't find template render")
 
+# use the last render as a template for our glue files
 templateRender = findRender(project.GetRenderJobList())
 jobs = []
 for i, s in enumerate(segments):
@@ -336,7 +336,7 @@ for i, s in enumerate(segments):
             "MarkIn": fromTimeline.GetStartFrame() + s.startframe,
             "MarkOut": fromTimeline.GetStartFrame() + (s.startframe+s.duration)-1,
             #TODO(dmo): figure out where to store this temporary file
-            'TargetDir': 'C:\\Users\\danie\\Videos\\splicetests\\temporaries',
+            'TargetDir': TEMPDIR,
             'CustomName': f'glue{i}.mov'
         }
         project.SetRenderSettings(rendersettings)
@@ -350,5 +350,32 @@ while project.IsRenderingInProgress():
 
 for j in jobs:
     status = project.GetRenderJobStatus(j)
-    if status['jobstatus'] != 'Complete':
+    if status['JobStatus'] != 'Complete':
         raise Exception(f"{j} render failed")
+
+# generate file for ffmpeg concat demuxer
+splicelines = []
+for i, s in enumerate(segments):
+    if s.src == "From":
+        if s.duration == 0:
+            continue
+        splicelines.append(f"file '{args.f}'")
+        splicelines.append(f"inpoint {s.startframe/framerate}")
+        splicelines.append(f"outpoint {(s.startframe+s.duration)/framerate}")
+    else:
+        if s.duration <= 0:
+            raise Exception("zero length 'to' segment, contact developer")
+        splicelines.append(f"file '{TEMPDIR}\\glue{i}.mov'")
+
+fileloc = f"{TEMPDIR}\\splice.txt"
+with open(fileloc, "w") as splicefile:
+    splicefile.write("\n".join(splicelines))
+command = [
+    "./ffmpeg.exe",
+    "-safe", "0",
+    "-f", "concat",
+    "-i", fileloc,
+    "-c", "copy",
+    args.o
+]
+res = subprocess.run(command)
