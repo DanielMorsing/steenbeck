@@ -6,8 +6,8 @@ Start of the steenbeck project
 """
 import subprocess
 import json
-import pprint
 import argparse
+import time
 from python_get_resolve import GetResolve
 
 def longestcommonsub(S1, S2):
@@ -55,7 +55,7 @@ def FindTimeline(project):
         if tl.GetName() == args.t:
             return tl
         
-    raise Exception("Could not find timeline {}".format(args.t))
+    raise Exception(f"Could not find timeline {args.t}")
 
 
 def GetTimelines( project ):
@@ -218,10 +218,10 @@ framerate = toTimeline.GetSetting("timelineFrameRate")
 intervals = []
 for i in prevIDR:
     second = i/framerate
-    intervals.append("{}%+#100".format(second))
+    intervals.append(f"{second}%+#100")
 for i in nextIDR:
     second = i/framerate
-    intervals.append("{}%+#100".format(second))
+    intervals.append(f"{second}%+#100")
 intervalstr = ",".join(intervals)
 
 # invoke ffmpeg and have it give us the frames that
@@ -318,7 +318,6 @@ if length != toTimeline.GetEndFrame() - toTimeline.GetStartFrame():
     raise Exception("made a sequence that is not same length as intended result, contact developer")
 
 # look for the latest render job that matches the video file
-# that matches the to file
 def findRender(renders):
     for r in reversed(renders):
         if r["TargetDir"] + '\\' + r["OutputFilename"] == args.f:
@@ -327,17 +326,29 @@ def findRender(renders):
     raise Exception("couldn't find template render")
 
 templateRender = findRender(project.GetRenderJobList())
-rendersettings = {
-    "IsExportAudio": False,
-    "FormatWidth": templateRender["FormatWidth"],
-    "FormatHeight": templateRender["FormatHeight"],
-#    "MarkIn": fromTimeline.GetStartFrame() + renderentry,
-#    "MarkOut": fromTimeline.GetStartFrame() + (renderexit-1),
-    #TODO(dmo): figure out where to store this temporary file
-    'TargetDir': 'C:\\Users\\danie\\Videos\\splicetests',
-    'CustomName': 'glue.mov'
-}
-project.SetRenderSettings(rendersettings)
-job = project.AddRenderJob()
-project.StartRendering(job)
+jobs = []
+for i, s in enumerate(segments):
+    if s.src == "To":
+        rendersettings = {
+            "IsExportAudio": False,
+            "FormatWidth": templateRender["FormatWidth"],
+            "FormatHeight": templateRender["FormatHeight"],
+            "MarkIn": fromTimeline.GetStartFrame() + s.startframe,
+            "MarkOut": fromTimeline.GetStartFrame() + (s.startframe+s.duration)-1,
+            #TODO(dmo): figure out where to store this temporary file
+            'TargetDir': 'C:\\Users\\danie\\Videos\\splicetests\\temporaries',
+            'CustomName': f'glue{i}.mov'
+        }
+        project.SetRenderSettings(rendersettings)
+        job = project.AddRenderJob()
+        jobs.append(job)
 
+project.StartRendering(jobs, isInteractiveMode=False)
+
+while project.IsRenderingInProgress():
+    time.sleep(1)
+
+for j in jobs:
+    status = project.GetRenderJobStatus(j)
+    if status['jobstatus'] != 'Complete':
+        raise Exception(f"{j} render failed")
