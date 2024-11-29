@@ -172,7 +172,8 @@ while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
         # insertion, emit an "original" segment, unless we are at the start
         # of the video
         if i != 0:
-            segments.append(original(origptr, NOFRAME, i-origptr))
+            duration = i-origptr
+            segments.append(original(origptr, j-duration, duration))
         
         oldj = j
         while lcs[s] != targetFrames[j]:
@@ -183,7 +184,8 @@ while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
         # deletion, emit an "original" section for up until the delete
         # sequence
         if i != 0:
-            segments.append(original(origptr, NOFRAME, i-origptr))
+            duration = i-origptr
+            segments.append(original(origptr, j-duration, duration))
         while lcs[s] != originalFrames[i]:
             i += 1
         origptr = i       
@@ -195,7 +197,8 @@ while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
 # after the loop, if we match on the ending segment,
 # emit it
 if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
-    segments.append(original(origptr, NOFRAME, i-origptr))
+    duration = i-origptr
+    segments.append(original(origptr, j-duration, i-origptr))
 
 # figure out which keyframes we need to find, either before or after
 # a given point
