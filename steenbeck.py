@@ -152,6 +152,8 @@ class segment:
         self.originalframe = originalframe
         self.targetframe = targetframe
         self.duration = duration
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} of:{self.originalframe} tf:{self.targetframe} dur:{self.duration}>"
 
 class original(segment):
     pass
