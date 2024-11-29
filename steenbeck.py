@@ -148,8 +148,9 @@ lcs = longestcommonsub(originalFrames, targetFrames)
 # for target segments, we use the frame number of the timeline we read
 # from resolve
 class segment:
-    def __init__(self, startframe, duration):
-        self.startframe = startframe
+    def __init__(self, originalframe, targetframe, duration):
+        self.originalframe = originalframe
+        self.targetframe = targetframe
         self.duration = duration
 
 class original(segment):
@@ -159,28 +160,31 @@ class target(segment):
 
 segments = []
 origptr = 0
+# sentinel value for when a frame number isn't valid
+# used for marking target frames in segments that should be taken from
+# the original file or original frames in target segments
+NOFRAME = None
 s, i, j = 0, 0, 0
 while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
     if lcs[s] != targetFrames[j]:
         # insertion, emit an "original" segment, unless we are at the start
         # of the video
         if i != 0:
-            segments.append(original(origptr, i-origptr))
+            segments.append(original(origptr, NOFRAME, i-origptr))
         
         oldj = j
         while lcs[s] != targetFrames[j]:
             j += 1
-        segments.append(target(oldj, j-oldj))
+        segments.append(target(NOFRAME, oldj, j-oldj))
         origptr = i
     elif lcs[s] != originalFrames[i]:
         # deletion, emit an "original" section for up until the delete
         # sequence
         if i != 0:
-            segments.append(original(origptr, i-origptr))
+            segments.append(original(origptr, NOFRAME, i-origptr))
         while lcs[s] != originalFrames[i]:
             i += 1
-        origptr = i
-        
+        origptr = i       
     else:
         s += 1
         i += 1
@@ -189,7 +193,7 @@ while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
 # after the loop, if we match on the ending segment,
 # emit it
 if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
-    segments.append(original(origptr, i-origptr))
+    segments.append(original(origptr, NOFRAME, i-origptr))
 
 # figure out which keyframes we need to find, either before or after
 # a given point
@@ -200,7 +204,7 @@ for i in range(len(segments)):
     if isinstance(s, target):
         if i != 0:
             prev = segments[i-1]
-            pi = prev.startframe + prev.duration
+            pi = prev.originalframe + prev.duration
             prevIDR[pi] = True
             if isinstance(prev, target):
                 raise Exception("should not ever get 2 target segments next to eachother")
@@ -208,7 +212,7 @@ for i in range(len(segments)):
         nexts = segments[i+1]
         if isinstance(nexts, target):
             raise Exception("should not ever get 2 target segments next to eachother")
-        nextIDR[nexts.startframe] = True
+        nextIDR[nexts.originalframe] = True
 
 # construct an interval string for ffmpeg.
 # Seeking will give us the first keyframe previous to the seek point
@@ -292,16 +296,16 @@ if args.debug:
 # based on the data we found from ffmpeg
 for i, s in enumerate(segments):
     if isinstance(s, target):
-        sf = s.startframe
+        sf = s.targetframe
         innudge = sf - prevIDR[sf]
-        s.startframe -= innudge
+        s.targetframe -= innudge
         s.duration += innudge
         segments[i-1].duration -= innudge
 
         nextseg = segments[i+1]
-        outnudge = nextIDR[nextseg.startframe] - nextseg.startframe
+        outnudge = nextIDR[nextseg.originalframe] - nextseg.originalframe
         s.duration += outnudge
-        nextseg.startframe += outnudge
+        nextseg.originalframe += outnudge
         nextseg.duration -= outnudge
 
 if args.debug:
@@ -313,7 +317,9 @@ if args.debug:
 # consistency check
 length = 0
 for s in segments:
-    if s.startframe < 0 or s.duration < 0:
+    of = s.originalframe
+    tf = s.targetframe
+    if (of != NOFRAME and of < 0) or (tf != NOFRAME and tf < 0) or s.duration < 0:
         raise Exception("overlapping segments, contact developer")
     length += s.duration
 
@@ -337,8 +343,8 @@ for i, s in enumerate(segments):
             "IsExportAudio": False,
             "FormatWidth": templateRender["FormatWidth"],
             "FormatHeight": templateRender["FormatHeight"],
-            "MarkIn": originalTimeline.GetStartFrame() + s.startframe,
-            "MarkOut": originalTimeline.GetStartFrame() + (s.startframe+s.duration)-1,
+            "MarkIn": originalTimeline.GetStartFrame() + s.targetframe,
+            "MarkOut": originalTimeline.GetStartFrame() + (s.targetframe+s.duration)-1,
             #TODO(dmo): figure out where to store this temporary file
             'TargetDir': TEMPDIR,
             'CustomName': f'glue{i}.mov'
@@ -364,8 +370,8 @@ for i, s in enumerate(segments):
         if s.duration == 0:
             continue
         splicelines.append(f"file '{args.f}'")
-        splicelines.append(f"inpoint {s.startframe/framerate}")
-        splicelines.append(f"outpoint {(s.startframe+s.duration)/framerate}")
+        splicelines.append(f"inpoint {s.originalframe/framerate}")
+        splicelines.append(f"outpoint {(s.originalframe+s.duration)/framerate}")
     else:
         if s.duration <= 0:
             raise Exception("zero length 'to' segment, contact developer")
