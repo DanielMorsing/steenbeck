@@ -277,26 +277,38 @@ framerate = int(d)
 # find all the keyframes that we need before a given point
 # TODO(dmo): clean up, this is ugly
 ptsperframe = timebase/framerate
+
+def findprevIDR(packets, i):
+    for j in reversed(range(i)):
+        if packets[j]["flags"] == "K__":
+            return packets[j]["pts"]
+
+def findnextIDR(packets, i):
+    for j in range(i, len(packets)):
+        if packets[j]["flags"] == "K__":
+            return packets[j]["pts"]
+    
+    # reached the end of the packet stream. We can get here
+    # either by not finding a keyframe or reaching the end
+    # of the video file
+    pkt = packets[j]
+    if pkt["pts"] + pkt["duration"] == stream["duration_ts"]:
+        return pkt["pts"]
+    
+    raise Exception("did not find following keyframe")
+
 for pi in prevIDR:
     ptstofind = pi * ptsperframe
     # TODO(dmo): could do binary search or something
     for i, p in enumerate(packets):
         if p["pts"] == ptstofind:
-            for j in reversed(range(i)):
-                if packets[j]["flags"] == "K__":
-                    prevIDR[pi] = packets[j]["pts"]/ptsperframe
-                    break
-            break
+            prevIDR[pi] = findprevIDR(packets, i)/ptsperframe
 
 for ni in nextIDR:
     ptstofind = ni * ptsperframe
     for i, p in enumerate(packets):
         if p["pts"] == ptstofind:
-            for j in range(i, len(packets)):
-                if packets[j]["flags"] == "K__":
-                    nextIDR[ni] = packets[j]["pts"]/ptsperframe
-                    break
-            break
+            nextIDR[ni] = findnextIDR(packets, i)/ptsperframe
 
 if args.debug:
     print("segment list before keyframe nudges")
