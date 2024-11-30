@@ -320,8 +320,9 @@ if args.debug:
 # based on the data we found from ffmpeg
 for i, s in enumerate(segments):
     if isinstance(s, target):
-        sf = s.targetframe
-        innudge = sf - prevIDR[sf]
+        lastsegment = segments[i-1]
+        of = lastsegment.originalframe + lastsegment.duration
+        innudge = of - prevIDR[of]
         s.targetframe -= innudge
         s.duration += innudge
         segments[i-1].duration -= innudge
