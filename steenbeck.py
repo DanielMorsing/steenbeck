@@ -223,7 +223,8 @@ for i in range(1, len(segments)):
             raise Exception("should not ever get 2 target segments next to eachother")
         nextIDR[nexts.originalframe] = True
     else:
-        prevIDR[s.originalframe] = True
+        prev = segments[i-1]
+        prevIDR[prev.originalframe + prev.duration] = True
         nextIDR[s.originalframe] = True
 
 # construct an interval string for ffmpeg.
@@ -316,28 +317,56 @@ if args.debug:
         print(s)
     print()
 
-# nudge the in and out points of all of our segments
-# based on the data we found from ffmpeg
-for i, s in enumerate(segments):
+#TODO(dmo): this algorithm produces concat files that have a duplicate keyframe
+# in them. As in, we produce a sequence with 2 I-frames with the same presentation
+# timestamp. This is obviously an off-by-one I have to figure out somewhere
+
+newsegments = []
+# create a new sequence with the in and out points 
+# of our segments nudged based on the data we found from ffmpeg
+for i, s in enumerate(segments[1:], 1):
+    lastsegment = segments[i-1]
     if isinstance(s, target):
-        lastsegment = segments[i-1]
         of = lastsegment.originalframe + lastsegment.duration
         innudge = of - prevIDR[of]
         s.targetframe -= innudge
         s.duration += innudge
-        segments[i-1].duration -= innudge
+        lastsegment.duration -= innudge
+        newsegments.append(lastsegment)
+        newsegments.append(s)
 
         nextseg = segments[i+1]
         outnudge = nextIDR[nextseg.originalframe] - nextseg.originalframe
         s.duration += outnudge
         nextseg.originalframe += outnudge
         nextseg.duration -= outnudge
+        newsegments.append(nextseg)
+    else:
+        # we have already had our in point nudged
+        if isinstance(lastsegment, target):
+            continue
+
+        # after this point, the previous segment is an original one.
+        # that means that we have a discontinuity and we need to
+        # ask resolve for a glue segment that covers the cut
+        of = lastsegment.originalframe + lastsegment.duration
+        innudge = of - prevIDR[of]
+        lastsegment.duration -= innudge
+        
+        outnudge = nextIDR[s.originalframe] - s.originalframe
+        newsegments.append(lastsegment)
+        tgt = target(None, s.targetframe - innudge, innudge+outnudge)
+        newsegments.append(tgt)
+        s.originalframe += outnudge
+        s.duration -= outnudge
+        newsegments.append(s)
 
 if args.debug:
     print("segment list after keyframe nudges")
-    for s in segments:
+    for s in newsegments:
         print(s)
     print()
+segments = newsegments
 
 # consistency check
 length = 0
@@ -412,6 +441,8 @@ command = [
     "-f", "concat",
     "-i", fileloc,
     "-c", "copy",
+    # TODO(dmo): for some weird ffmpeg produces a stupid file if we select audio
+    "-map", "0:v:0",
     args.o
 ]
 res = subprocess.run(command)
