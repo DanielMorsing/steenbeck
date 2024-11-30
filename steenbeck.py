@@ -222,6 +222,9 @@ for i in range(1, len(segments)):
         if isinstance(nexts, target):
             raise Exception("should not ever get 2 target segments next to eachother")
         nextIDR[nexts.originalframe] = True
+    else:
+        prevIDR[s.originalframe] = True
+        nextIDR[s.originalframe] = True
 
 # construct an interval string for ffmpeg.
 # Seeking will give us the first keyframe previous to the seek point
@@ -286,7 +289,7 @@ for pi in prevIDR:
             break
 
 for ni in nextIDR:
-    ptstofind = pi * ptsperframe
+    ptstofind = ni * ptsperframe
     for i, p in enumerate(packets):
         if p["pts"] == ptstofind:
             for j in range(i, len(packets)):
