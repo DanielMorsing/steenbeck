@@ -204,16 +204,20 @@ if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
 # a given point
 prevIDR = {}
 nextIDR = {}
-for i in range(len(segments)):
+# the first segment will never need to have it's entry keyframe checked
+# skip it
+for i in range(1, len(segments)):
     s = segments[i]
     if isinstance(s, target):
-        if i != 0:
-            prev = segments[i-1]
-            pi = prev.originalframe + prev.duration
-            prevIDR[pi] = True
-            if isinstance(prev, target):
-                raise Exception("should not ever get 2 target segments next to eachother")
+        prev = segments[i-1]
+        pi = prev.originalframe + prev.duration
+        prevIDR[pi] = True
+        if isinstance(prev, target):
+            raise Exception("should not ever get 2 target segments next to eachother")
 
+        # no segment after this, no need to figure out the out keyframe
+        if i == len(segments)-1:
+            continue
         nexts = segments[i+1]
         if isinstance(nexts, target):
             raise Exception("should not ever get 2 target segments next to eachother")
