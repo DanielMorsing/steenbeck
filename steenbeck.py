@@ -227,7 +227,8 @@ for i in range(1, len(segments)):
         nextIDR[nexts.originalframe] = True
     else:
         prev = segments[i-1]
-        prevIDR[prev.originalframe + prev.duration] = True
+        if isinstance(prev, original):
+            prevIDR[prev.originalframe + prev.duration] = True
         nextIDR[s.originalframe] = True
 
 # construct an interval string for ffmpeg.
