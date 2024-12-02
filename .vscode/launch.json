@@ -13,6 +13,7 @@
             "args": ["-t", "Timeline 1",
                      "-debuglogs",
                      "-debuguniquename",
+                     "-debugreport",
                      "-f", "C:\\Users\\danie\\Videos\\splicetests\\firstversion.mov",
                      "-o", "output.mov"]
         }

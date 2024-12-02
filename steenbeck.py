@@ -85,6 +85,7 @@ parser.add_argument('-f')
 parser.add_argument('-o')
 parser.add_argument('-debuglogs', action='store_true')
 parser.add_argument('-debuguniquename', action='store_true')
+parser.add_argument('-debugreport', action='store_true')
 
 args = parser.parse_args()
 
@@ -442,9 +443,14 @@ if args.debuguniquename:
     now = datetime.datetime.now()
     outputfile = f"output-{now.strftime("%y%m%d-%H%M%S")}.mov"
 
+reportflag = None
+if args.debugreport:
+    reportflag = "-report"
+
 command = [
     "./ffmpeg.exe",
     "-y",
+    reportflag,
     "-safe", "0",
     "-f", "concat",
     "-i", fileloc,
@@ -453,4 +459,5 @@ command = [
     "-map", "0:v:0",
     outputfile
 ]
+command = [i for i in command if i is not None]
 res = subprocess.run(command)
