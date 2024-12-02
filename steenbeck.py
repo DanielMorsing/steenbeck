@@ -428,7 +428,12 @@ for i, s in enumerate(segments):
             continue
         splicelines.append(f"file '{args.f}'")
         splicelines.append(f"inpoint {s.originalframe/framerate}")
-        splicelines.append(f"outpoint {(s.originalframe+s.duration)/framerate}")
+        # ffmpeg goes by decode timestamp when determining when to stop concatenating
+        # and the outpoint is exclusive, so we need to specify the frame before the keyframe
+        # Also, specify a duration since without this, it will take use the outpoint
+        # and mess up the presentation timestamp for the following file
+        splicelines.append(f"outpoint {(s.originalframe+s.duration-1)/framerate}")
+        splicelines.append(f"duration {s.duration/framerate}")
     else:
         if s.duration <= 0:
             raise Exception("zero length 'to' segment, contact developer")
