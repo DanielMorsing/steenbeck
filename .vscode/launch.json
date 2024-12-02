@@ -11,7 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": ["-t", "Timeline 1",
-                     "-debug",
+                     "-debuglogs",
+                     "-debuguniquename",
                      "-f", "C:\\Users\\danie\\Videos\\splicetests\\firstversion.mov",
                      "-o", "output.mov"]
         }

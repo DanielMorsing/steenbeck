@@ -8,6 +8,7 @@ import subprocess
 import json
 import argparse
 import time
+import datetime
 from python_get_resolve import GetResolve
 
 #TODO(dmo): figure out what this temporary directory actually needs to be
@@ -82,7 +83,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-t')
 parser.add_argument('-f')
 parser.add_argument('-o')
-parser.add_argument('-debug', action='store_true')
+parser.add_argument('-debuglogs', action='store_true')
+parser.add_argument('-debuguniquename', action='store_true')
 
 args = parser.parse_args()
 
@@ -311,7 +313,7 @@ for ni in nextIDR:
         if p["pts"] == ptstofind:
             nextIDR[ni] = findnextIDR(packets, i)/ptsperframe
 
-if args.debug:
+if args.debuglogs:
     print("segment list before keyframe nudges")
     for s in segments:
         print(s)
@@ -361,7 +363,7 @@ for i, s in enumerate(segments[1:], 1):
         s.duration -= outnudge
         newsegments.append(s)
 
-if args.debug:
+if args.debuglogs:
     print("segment list after keyframe nudges")
     for s in newsegments:
         print(s)
@@ -434,6 +436,12 @@ for i, s in enumerate(segments):
 fileloc = f"{TEMPDIR}\\splice.txt"
 with open(fileloc, "w") as splicefile:
     splicefile.write("\n".join(splicelines))
+
+outputfile = args.o
+if args.debuguniquename:
+    now = datetime.datetime.now()
+    outputfile = f"output-{now.strftime("%y%m%d-%H%M%S")}.mov"
+
 command = [
     "./ffmpeg.exe",
     "-y",
@@ -443,6 +451,6 @@ command = [
     "-c", "copy",
     # TODO(dmo): for some weird ffmpeg produces a stupid file if we select audio
     "-map", "0:v:0",
-    args.o
+    outputfile
 ]
 res = subprocess.run(command)

@@ -2,4 +2,4 @@ __pycache__/
 ffmpeg.exe
 ffprobe.exe
 splice.txt
-output.mov
+output-*-*.mov
