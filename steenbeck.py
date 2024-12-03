@@ -9,6 +9,7 @@ import json
 import argparse
 import time
 import datetime
+from collections import defaultdict
 from python_get_resolve import GetResolve
 
 #TODO(dmo): figure out what this temporary directory actually needs to be
@@ -155,6 +156,9 @@ class segment:
         self.originalframe = originalframe
         self.targetframe = targetframe
         self.duration = duration
+
+        self.previousKeyframe = None
+        self.nextKeyframe = None
     def __repr__(self) -> str:
         return f"<{type(self).__name__} of:{self.originalframe} tf:{self.targetframe} dur:{self.duration}>"
 
@@ -205,8 +209,8 @@ if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
 
 # figure out which keyframes we need to find, either before or after
 # a given point
-prevKeyframe = {}
-nextKeyframe = {}
+prevKeyframe = defaultdict(list)
+nextKeyframe = defaultdict(list)
 # the first segment will never need to have it's entry keyframe checked
 # skip it
 for i in range(1, len(segments)):
@@ -214,7 +218,7 @@ for i in range(1, len(segments)):
     if isinstance(s, target):
         prev = segments[i-1]
         pi = prev.originalframe + prev.duration
-        prevKeyframe[pi] = True
+        prevKeyframe[pi].append(s)
         if isinstance(prev, target):
             raise Exception("should not ever get 2 target segments next to eachother")
 
@@ -224,12 +228,12 @@ for i in range(1, len(segments)):
         nexts = segments[i+1]
         if isinstance(nexts, target):
             raise Exception("should not ever get 2 target segments next to eachother")
-        nextKeyframe[nexts.originalframe] = True
+        nextKeyframe[nexts.originalframe].append(s)
     else:
         prev = segments[i-1]
         if isinstance(prev, original):
-            prevKeyframe[prev.originalframe + prev.duration] = True
-        nextKeyframe[s.originalframe] = True
+            prevKeyframe[prev.originalframe + prev.duration].append(s)
+        nextKeyframe[s.originalframe].append(s)
 
 # construct an interval string for ffmpeg.
 # Seeking will give us the first keyframe previous to the seek point
@@ -307,13 +311,17 @@ for pi in prevKeyframe:
     # TODO(dmo): could do binary search or something
     for i, p in enumerate(packets):
         if p["pts"] == ptstofind:
-            prevKeyframe[pi] = findprevKeyframe(packets, i)/ptsperframe
+            keyframe = findprevKeyframe(packets, i)/ptsperframe
+            for s in prevKeyframe[pi]:
+                s.previousKeyframe = keyframe
 
 for ni in nextKeyframe:
     ptstofind = ni * ptsperframe
     for i, p in enumerate(packets):
         if p["pts"] == ptstofind:
-            nextKeyframe[ni] = findnextKeyframe(packets, i)/ptsperframe
+            keyframe = findnextKeyframe(packets, i)/ptsperframe
+            for s in nextKeyframe[ni]:
+                s.nextKeyframe = keyframe
 
 if args.debuglogs:
     print("segment list before keyframe nudges")
@@ -328,7 +336,7 @@ for i, s in enumerate(segments[1:], 1):
     lastsegment = segments[i-1]
     if isinstance(s, target):
         of = lastsegment.originalframe + lastsegment.duration
-        innudge = of - prevKeyframe[of]
+        innudge = of - s.previousKeyframe
         s.targetframe -= innudge
         s.duration += innudge
         lastsegment.duration -= innudge
@@ -336,7 +344,7 @@ for i, s in enumerate(segments[1:], 1):
         newsegments.append(s)
 
         nextseg = segments[i+1]
-        outnudge = nextKeyframe[nextseg.originalframe] - nextseg.originalframe
+        outnudge = s.nextKeyframe - nextseg.originalframe
         s.duration += outnudge
         nextseg.originalframe += outnudge
         nextseg.duration -= outnudge
@@ -350,10 +358,10 @@ for i, s in enumerate(segments[1:], 1):
         # that means that we have a discontinuity and we need to
         # ask resolve for a glue segment that covers the cut
         of = lastsegment.originalframe + lastsegment.duration
-        innudge = of - prevKeyframe[of]
+        innudge = of - s.previousKeyframe
         lastsegment.duration -= innudge
         
-        outnudge = nextKeyframe[s.originalframe] - s.originalframe
+        outnudge = s.nextKeyframe - s.originalframe
         newsegments.append(lastsegment)
         tgt = target(None, s.targetframe - innudge, innudge+outnudge)
         newsegments.append(tgt)
