@@ -321,10 +321,6 @@ if args.debuglogs:
         print(s)
     print()
 
-#TODO(dmo): this algorithm produces concat files that have a duplicate keyframe
-# in them. As in, we produce a sequence with 2 I-frames with the same presentation
-# timestamp. This is obviously an off-by-one I have to figure out somewhere
-
 newsegments = []
 # create a new sequence with the in and out points 
 # of our segments nudged based on the data we found from ffmpeg
