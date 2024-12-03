@@ -205,8 +205,8 @@ if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
 
 # figure out which keyframes we need to find, either before or after
 # a given point
-prevIDR = {}
-nextIDR = {}
+prevKeyframe = {}
+nextKeyframe = {}
 # the first segment will never need to have it's entry keyframe checked
 # skip it
 for i in range(1, len(segments)):
@@ -214,7 +214,7 @@ for i in range(1, len(segments)):
     if isinstance(s, target):
         prev = segments[i-1]
         pi = prev.originalframe + prev.duration
-        prevIDR[pi] = True
+        prevKeyframe[pi] = True
         if isinstance(prev, target):
             raise Exception("should not ever get 2 target segments next to eachother")
 
@@ -224,22 +224,22 @@ for i in range(1, len(segments)):
         nexts = segments[i+1]
         if isinstance(nexts, target):
             raise Exception("should not ever get 2 target segments next to eachother")
-        nextIDR[nexts.originalframe] = True
+        nextKeyframe[nexts.originalframe] = True
     else:
         prev = segments[i-1]
         if isinstance(prev, original):
-            prevIDR[prev.originalframe + prev.duration] = True
-        nextIDR[s.originalframe] = True
+            prevKeyframe[prev.originalframe + prev.duration] = True
+        nextKeyframe[s.originalframe] = True
 
 # construct an interval string for ffmpeg.
 # Seeking will give us the first keyframe previous to the seek point
 # 100 frames after is a guess for when we will see a keyframe again.
 framerate = targetTimeline.GetSetting("timelineFrameRate")
 intervals = []
-for i in prevIDR:
+for i in prevKeyframe:
     second = i/framerate
     intervals.append(f"{second}%+#100")
-for i in nextIDR:
+for i in nextKeyframe:
     second = i/framerate
     intervals.append(f"{second}%+#100")
 intervalstr = ",".join(intervals)
@@ -283,12 +283,12 @@ framerate = int(d)
 # TODO(dmo): clean up, this is ugly
 ptsperframe = timebase/framerate
 
-def findprevIDR(packets, i):
+def findprevKeyframe(packets, i):
     for j in reversed(range(i)):
         if packets[j]["flags"] == "K__":
             return packets[j]["pts"]
 
-def findnextIDR(packets, i):
+def findnextKeyframe(packets, i):
     for j in range(i, len(packets)):
         if packets[j]["flags"] == "K__":
             return packets[j]["pts"]
@@ -302,18 +302,18 @@ def findnextIDR(packets, i):
     
     raise Exception("did not find following keyframe")
 
-for pi in prevIDR:
+for pi in prevKeyframe:
     ptstofind = pi * ptsperframe
     # TODO(dmo): could do binary search or something
     for i, p in enumerate(packets):
         if p["pts"] == ptstofind:
-            prevIDR[pi] = findprevIDR(packets, i)/ptsperframe
+            prevKeyframe[pi] = findprevKeyframe(packets, i)/ptsperframe
 
-for ni in nextIDR:
+for ni in nextKeyframe:
     ptstofind = ni * ptsperframe
     for i, p in enumerate(packets):
         if p["pts"] == ptstofind:
-            nextIDR[ni] = findnextIDR(packets, i)/ptsperframe
+            nextKeyframe[ni] = findnextKeyframe(packets, i)/ptsperframe
 
 if args.debuglogs:
     print("segment list before keyframe nudges")
@@ -328,7 +328,7 @@ for i, s in enumerate(segments[1:], 1):
     lastsegment = segments[i-1]
     if isinstance(s, target):
         of = lastsegment.originalframe + lastsegment.duration
-        innudge = of - prevIDR[of]
+        innudge = of - prevKeyframe[of]
         s.targetframe -= innudge
         s.duration += innudge
         lastsegment.duration -= innudge
@@ -336,7 +336,7 @@ for i, s in enumerate(segments[1:], 1):
         newsegments.append(s)
 
         nextseg = segments[i+1]
-        outnudge = nextIDR[nextseg.originalframe] - nextseg.originalframe
+        outnudge = nextKeyframe[nextseg.originalframe] - nextseg.originalframe
         s.duration += outnudge
         nextseg.originalframe += outnudge
         nextseg.duration -= outnudge
@@ -350,10 +350,10 @@ for i, s in enumerate(segments[1:], 1):
         # that means that we have a discontinuity and we need to
         # ask resolve for a glue segment that covers the cut
         of = lastsegment.originalframe + lastsegment.duration
-        innudge = of - prevIDR[of]
+        innudge = of - prevKeyframe[of]
         lastsegment.duration -= innudge
         
-        outnudge = nextIDR[s.originalframe] - s.originalframe
+        outnudge = nextKeyframe[s.originalframe] - s.originalframe
         newsegments.append(lastsegment)
         tgt = target(None, s.targetframe - innudge, innudge+outnudge)
         newsegments.append(tgt)
