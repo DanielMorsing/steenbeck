@@ -318,7 +318,8 @@ dumpsegments("segment list before keyframe nudges", segments)
 
 # create a new sequence with the in and out points 
 # of our segments nudged based on the data we found from ffmpeg
-# TODO(dmo): figure out deletions
+# TODO(dmo): figure out how this works in corner cases where an outkeyframe is
+# before the beginning of the segment or a inkeyframe is after an outkeyframe 
 for i, s in enumerate(segments):
     if isinstance(s, target):
         continue
@@ -327,19 +328,38 @@ for i, s in enumerate(segments):
     outnudge = (s.originalframe + s.duration) - s.outKeyframe
     if innudge > 0:
         prevsegment = segments[i-1]
-        if isinstance(prevsegment, target):
-            prevsegment.duration += innudge
-            s.duration -= innudge
-            s.originalframe += innudge
+        prevsegment.duration += innudge
+        s.duration -= innudge
+        s.originalframe += innudge
     if outnudge > 0 and i != len(segments)-1:
         nextseg = segments[i+1]
-        if isinstance(nextseg, target):
-            nextseg.duration += outnudge
-            nextseg.originalframe -= outnudge
-            s.duration -= outnudge
+        nextseg.duration += outnudge
+        nextseg.originalframe -= outnudge
+        s.duration -= outnudge
 
 dumpsegments("segment list after keyframe nudges", segments)
+# after we've nudged the cut points, find any segment
+# that still has a difference between its outframe
+# and the outgoing keyframe. This indicates a spot
+# that needs glue
+newsegments = []
+for i, s in enumerate(segments):
+    if isinstance(s, target):
+        newsegments.append(s)
+        continue
+    outframe = s.originalframe + s.duration
+    if s.outKeyframe < outframe:
+        tgtduration = outframe - s.outKeyframe
+        s.duration -= tgtduration
+        tgtframe = s.originalframe + s.positiondelta
+        tgtframe += s.duration
+        newsegments.append(s)
+        newsegments.append(target(tgtframe, 0, tgtduration))
+    else:
+        newsegments.append(s)
 
+segments = newsegments
+dumpsegments("segment list after glue insertion", segments)
 # consistency check
 length = 0
 for s in segments:
@@ -407,6 +427,7 @@ for i, s in enumerate(segments):
         if s.duration <= 0:
             raise Exception("zero length 'to' segment, contact developer")
         splicelines.append(f"file '{TEMPDIR}\\glue{i}.mov'")
+        splicelines.append(f"duration {s.duration/framerate}")
 
 fileloc = f"{TEMPDIR}\\splice.txt"
 with open(fileloc, "w") as splicefile:
