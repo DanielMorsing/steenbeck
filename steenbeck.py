@@ -152,15 +152,15 @@ lcs = longestcommonsub(originalFrames, targetFrames)
 # for target segments, we use the frame number of the timeline we read
 # from resolve
 class segment:
-    def __init__(self, originalframe, targetframe, duration):
+    def __init__(self, originalframe, positiondelta, duration):
         self.originalframe = originalframe
-        self.targetframe = targetframe
+        self.positiondelta = positiondelta
         self.duration = duration
 
-        self.previousKeyframe = None
-        self.nextKeyframe = None
+        self.inKeyframe = None
+        self.outKeyframe = None
     def __repr__(self) -> str:
-        return f"<{type(self).__name__} of:{self.originalframe} tf:{self.targetframe} dur:{self.duration}>"
+        return f"<{type(self).__name__} of:{self.originalframe} delta:{self.positiondelta} dur:{self.duration}>"
 
 class original(segment):
     pass
@@ -180,19 +180,19 @@ while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
         # of the video
         if i != 0:
             duration = i-origptr
-            segments.append(original(origptr, j-duration, duration))
+            segments.append(original(origptr, j-i, duration))
         
         oldj = j
         while lcs[s] != targetFrames[j]:
             j += 1
-        segments.append(target(NOFRAME, oldj, j-oldj))
+        segments.append(target(oldj, 0, j-oldj))
         origptr = i
     elif lcs[s] != originalFrames[i]:
         # deletion, emit an "original" section for up until the delete
         # sequence
         if i != 0:
             duration = i-origptr
-            segments.append(original(origptr, j-duration, duration))
+            segments.append(original(origptr, j-i, duration))
         while lcs[s] != originalFrames[i]:
             i += 1
         origptr = i       
@@ -205,45 +205,34 @@ while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
 # emit it
 if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
     duration = i-origptr
-    segments.append(original(origptr, j-duration, i-origptr))
+    segments.append(original(origptr, j-i, i-origptr))
 
-# figure out which keyframes we need to find, either before or after
-# a given point
-prevKeyframe = defaultdict(list)
-nextKeyframe = defaultdict(list)
-# the first segment will never need to have it's entry keyframe checked
-# skip it
-for i in range(1, len(segments)):
-    s = segments[i]
+# for every segment, find the keyframe after its in point and the one before it's out point
+# these will act as "handles" when we start gluing segments together
+inKeyframe = {}
+outKeyframe = {}
+for s in segments:
+    # target segments do not have keyframes at their entry or exit
+    # rely on them being next to original segments that do
     if isinstance(s, target):
-        prev = segments[i-1]
-        pi = prev.originalframe + prev.duration
-        prevKeyframe[pi].append(s)
-        if isinstance(prev, target):
-            raise Exception("should not ever get 2 target segments next to eachother")
+        continue
 
-        # no segment after this, no need to figure out the out keyframe
-        if i == len(segments)-1:
-            continue
-        nexts = segments[i+1]
-        if isinstance(nexts, target):
-            raise Exception("should not ever get 2 target segments next to eachother")
-        nextKeyframe[nexts.originalframe].append(s)
+    inKeyframe[s.originalframe] = s
+    outframe = s.originalframe+s.duration
+    if outframe < len(originalFrames):
+        outKeyframe[outframe] = s
     else:
-        prev = segments[i-1]
-        if isinstance(prev, original):
-            prevKeyframe[prev.originalframe + prev.duration].append(s)
-        nextKeyframe[s.originalframe].append(s)
+        s.outKeyframe = outframe
 
 # construct an interval string for ffmpeg.
 # Seeking will give us the first keyframe previous to the seek point
 # 100 frames after is a guess for when we will see a keyframe again.
 framerate = targetTimeline.GetSetting("timelineFrameRate")
 intervals = []
-for i in prevKeyframe:
+for i in inKeyframe:
     second = i/framerate
     intervals.append(f"{second}%+#100")
-for i in nextKeyframe:
+for i in outKeyframe:
     second = i/framerate
     intervals.append(f"{second}%+#100")
 intervalstr = ",".join(intervals)
@@ -287,6 +276,9 @@ framerate = int(d)
 # TODO(dmo): clean up, this is ugly
 ptsperframe = timebase/framerate
 
+def islastframe(pkt):
+    return pkt["pts"] + pkt["duration"] == stream["duration_ts"]
+
 def findprevKeyframe(packets, i):
     for j in reversed(range(i)):
         if packets[j]["flags"] == "K__":
@@ -300,88 +292,58 @@ def findnextKeyframe(packets, i):
     # reached the end of the packet stream. We can get here
     # either by not finding a keyframe or reaching the end
     # of the video file
-    pkt = packets[j]
-    if pkt["pts"] + pkt["duration"] == stream["duration_ts"]:
-        return pkt["pts"]
-    
+    if islastframe(packets[j]):
+        return packets[j]["pts"]
     raise Exception("did not find following keyframe")
 
-for pi in prevKeyframe:
-    ptstofind = pi * ptsperframe
-    # TODO(dmo): could do binary search or something
-    for i, p in enumerate(packets):
-        if p["pts"] == ptstofind:
-            keyframe = findprevKeyframe(packets, i)/ptsperframe
-            for s in prevKeyframe[pi]:
-                s.previousKeyframe = keyframe
+for i, p in enumerate(packets):
+    framenum = p["pts"]/ptsperframe
+    if framenum in inKeyframe:
+        keyframe = findnextKeyframe(packets, i)/ptsperframe
+        inKeyframe[framenum].inKeyframe = keyframe
+    if framenum in outKeyframe:
+        keyframe = findprevKeyframe(packets, i)/ptsperframe
+        outKeyframe[framenum].outKeyframe = keyframe
 
-for ni in nextKeyframe:
-    ptstofind = ni * ptsperframe
-    for i, p in enumerate(packets):
-        if p["pts"] == ptstofind:
-            keyframe = findnextKeyframe(packets, i)/ptsperframe
-            for s in nextKeyframe[ni]:
-                s.nextKeyframe = keyframe
+def dumpsegments(msg, segs):
+    if not args.debuglogs:
+        return
 
-if args.debuglogs:
-    print("segment list before keyframe nudges")
-    for s in segments:
+    print(msg)
+    for s in segs:
         print(s)
     print()
 
-newsegments = []
+dumpsegments("segment list before keyframe nudges", segments)
+
 # create a new sequence with the in and out points 
 # of our segments nudged based on the data we found from ffmpeg
-for i, s in enumerate(segments[1:], 1):
-    lastsegment = segments[i-1]
+# TODO(dmo): figure out deletions
+for i, s in enumerate(segments):
     if isinstance(s, target):
-        of = lastsegment.originalframe + lastsegment.duration
-        innudge = of - s.previousKeyframe
-        s.targetframe -= innudge
-        s.duration += innudge
-        lastsegment.duration -= innudge
-        newsegments.append(lastsegment)
-        newsegments.append(s)
+        continue
 
-        nextseg = segments[i+1]
-        outnudge = s.nextKeyframe - nextseg.originalframe
-        s.duration += outnudge
-        nextseg.originalframe += outnudge
-        nextseg.duration -= outnudge
-        newsegments.append(nextseg)
-    else:
-        # we have already had our in point nudged
-        if isinstance(lastsegment, target):
-            continue
-
-        # after this point, the previous segment is an original one.
-        # that means that we have a discontinuity and we need to
-        # ask resolve for a glue segment that covers the cut
-        of = lastsegment.originalframe + lastsegment.duration
-        innudge = of - s.previousKeyframe
-        lastsegment.duration -= innudge
-        
-        outnudge = s.nextKeyframe - s.originalframe
-        newsegments.append(lastsegment)
-        tgt = target(None, s.targetframe - innudge, innudge+outnudge)
-        newsegments.append(tgt)
-        s.originalframe += outnudge
+    innudge = s.inKeyframe - s.originalframe
+    outnudge = (s.originalframe + s.duration) - s.outKeyframe
+    if innudge > 0:
+        prevsegment = segments[i-1]
+        prevsegment.duration += innudge
+        s.duration -= innudge
+        s.originalframe += innudge
+    if outnudge > 0:
+        if i != len(segments)-1:
+            nextseg = segments[i+1]
+            nextseg.duration += outnudge
+            nextseg.originalframe -= outnudge
         s.duration -= outnudge
-        newsegments.append(s)
 
-if args.debuglogs:
-    print("segment list after keyframe nudges")
-    for s in newsegments:
-        print(s)
-    print()
-segments = newsegments
+dumpsegments("segment list after keyframe nudges", segments)
 
 # consistency check
 length = 0
 for s in segments:
     of = s.originalframe
-    tf = s.targetframe
-    if (of != NOFRAME and of < 0) or (tf != NOFRAME and tf < 0) or s.duration < 0:
+    if of < 0 or s.duration < 0:
         raise Exception("overlapping segments, contact developer")
     length += s.duration
 
@@ -401,12 +363,13 @@ templateRender = findRender(project.GetRenderJobList())
 jobs = []
 for i, s in enumerate(segments):
     if isinstance(s, target):
+        targetstart = s.originalframe + s.positiondelta
         rendersettings = {
             "IsExportAudio": False,
             "FormatWidth": templateRender["FormatWidth"],
             "FormatHeight": templateRender["FormatHeight"],
-            "MarkIn": originalTimeline.GetStartFrame() + s.targetframe,
-            "MarkOut": originalTimeline.GetStartFrame() + (s.targetframe+s.duration)-1,
+            "MarkIn": originalTimeline.GetStartFrame() + targetstart,
+            "MarkOut": originalTimeline.GetStartFrame() + (targetstart+s.duration)-1,
             #TODO(dmo): figure out where to store this temporary file
             'TargetDir': TEMPDIR,
             'CustomName': f'glue{i}.mov'
@@ -429,7 +392,7 @@ for j in jobs:
 splicelines = []
 for i, s in enumerate(segments):
     if isinstance(s, original):
-        if s.duration == 0:
+        if s.duration <= 0:
             continue
         splicelines.append(f"file '{args.f}'")
         splicelines.append(f"inpoint {s.originalframe/framerate}")
