@@ -160,7 +160,7 @@ class segment:
         self.inKeyframe = None
         self.outKeyframe = None
     def __repr__(self) -> str:
-        return f"<{type(self).__name__} of:{self.originalframe} delta:{self.positiondelta} dur:{self.duration}>"
+        return f"<{type(self).__name__} of:{self.originalframe} delta:{self.positiondelta} dur:{self.duration} inframe:{self.inKeyframe} outframe:{self.outKeyframe}>"
 
 class original(segment):
     pass
@@ -327,15 +327,16 @@ for i, s in enumerate(segments):
     outnudge = (s.originalframe + s.duration) - s.outKeyframe
     if innudge > 0:
         prevsegment = segments[i-1]
-        prevsegment.duration += innudge
-        s.duration -= innudge
-        s.originalframe += innudge
-    if outnudge > 0:
-        if i != len(segments)-1:
-            nextseg = segments[i+1]
+        if isinstance(prevsegment, target):
+            prevsegment.duration += innudge
+            s.duration -= innudge
+            s.originalframe += innudge
+    if outnudge > 0 and i != len(segments)-1:
+        nextseg = segments[i+1]
+        if isinstance(nextseg, target):
             nextseg.duration += outnudge
             nextseg.originalframe -= outnudge
-        s.duration -= outnudge
+            s.duration -= outnudge
 
 dumpsegments("segment list after keyframe nudges", segments)
 
