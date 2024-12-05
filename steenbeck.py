@@ -90,6 +90,15 @@ parser.add_argument('-debugreport', action='store_true')
 
 args = parser.parse_args()
 
+def dumpsegments(msg, segs):
+    if not args.debuglogs:
+        return
+
+    print(msg)
+    for s in segs:
+        print(s)
+    print()
+
 resolve = GetResolve()
 project = GetProject(resolve)
 originalTimeline, targetTimeline = GetTimelines(project)
@@ -168,44 +177,37 @@ class target(segment):
     pass
 
 segments = []
-origptr = 0
-# sentinel value for when a frame number isn't valid
-# used for marking target frames in segments that should be taken from
-# the original file or original frames in target segments
-NOFRAME = None
 s, i, j = 0, 0, 0
-while s < len(lcs) and i < len(originalFrames) and j < len(targetFrames):
-    if lcs[s] != targetFrames[j]:
-        # insertion, emit an "original" segment, unless we are at the start
-        # of the video
-        if i != 0:
-            duration = i-origptr
-            segments.append(original(origptr, j-i, duration))
-        
+def sequenceleft():
+    return s < len(lcs) and i < len(originalFrames) and j < len(targetFrames)
+
+while sequenceleft():
+    # walk sequences until we don't match
+    oldi = i
+    while sequenceleft() and (lcs[s] == originalFrames[i] == targetFrames[j]):
+        s += 1
+        i += 1
+        j += 1
+    if oldi != i:
+        segments.append(original(oldi, j-i, i-oldi))
+
+    if not sequenceleft():
+        break
+    
+    # this is an insertion, walk target frames until we
+    # match and emit a target segment
+    if lcs[s] != targetFrames[j]:        
         oldj = j
         while lcs[s] != targetFrames[j]:
             j += 1
         segments.append(target(oldj, 0, j-oldj))
-        origptr = i
-    elif lcs[s] != originalFrames[i]:
-        # deletion, emit an "original" section for up until the delete
-        # sequence
-        if i != 0:
-            duration = i-origptr
-            segments.append(original(origptr, j-i, duration))
+
+    # deletion, walk until we match up again
+    if lcs[s] != originalFrames[i]:    
         while lcs[s] != originalFrames[i]:
             i += 1
-        origptr = i       
-    else:
-        s += 1
-        i += 1
-        j += 1
 
-# after the loop, if we match on the ending segment,
-# emit it
-if lcs[s-1] == originalFrames[i-1] == targetFrames[j-1]:
-    duration = i-origptr
-    segments.append(original(origptr, j-i, i-origptr))
+dumpsegments("segment list before keyframe search", segments)
 
 # for every segment, find the keyframe after its in point and the one before it's out point
 # these will act as "handles" when we start gluing segments together
@@ -304,15 +306,6 @@ for i, p in enumerate(packets):
     if framenum in outKeyframe:
         keyframe = findprevKeyframe(packets, i)/ptsperframe
         outKeyframe[framenum].outKeyframe = keyframe
-
-def dumpsegments(msg, segs):
-    if not args.debuglogs:
-        return
-
-    print(msg)
-    for s in segs:
-        print(s)
-    print()
 
 dumpsegments("segment list before keyframe nudges", segments)
 
