@@ -307,6 +307,40 @@ for i, p in enumerate(packets):
         keyframe = findprevKeyframe(packets, i)/ptsperframe
         outKeyframe[framenum].outKeyframe = keyframe
 
+dumpsegments("after keyframe search", segments)
+
+# go through every segment, if any of the original segments have overlapping
+# in and out keyframes, turn the segment into a target one
+for i, s in enumerate(segments):
+    if isinstance(s, target):
+        continue
+    if s.inKeyframe >= s.outKeyframe:
+        segments[i] = target(s.originalframe + s.positiondelta, 0, s.duration) 
+
+dumpsegments("after overlap target morph", segments)
+
+# the previous pass can cause target segments next to each other.
+# "roll up" consecutive target segments into one segment
+newsegments = []
+targetaccum = None
+for i, s in enumerate(segments):
+    if isinstance(s, original):
+        if targetaccum != None:
+            newsegments.append(targetaccum)
+            targetaccum = None
+        newsegments.append(s)
+        continue
+    if targetaccum == None:
+        targetaccum = s
+    elif targetaccum.originalframe + targetaccum.duration == s.originalframe:
+        targetaccum.duration += s.duration
+    else:
+        newsegments.append(targetaccum)
+        targetaccum = None
+if targetaccum != None:
+    newsegments.append(targetaccum)
+
+segments = newsegments
 dumpsegments("segment list before keyframe nudges", segments)
 
 # create a new sequence with the in and out points 
