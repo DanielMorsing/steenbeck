@@ -121,42 +121,42 @@ def calculateFrameSeq(timeline):
     frames = []
     for _ in range(tlduration):
         frames.append([])
-    items = timeline.GetItemListInTrack('video', 1)
-    for it in items:
-        # TODO(dmo): when we make this work for multiple tracks, this
-        # obviously has to change. It is not guaranteed to be contiguous over
-        # every frame
-        # also, we need to look at file properties. this will especially become
-        # important when we have to work with titles, which will change text
-        name = it.GetName()
-        start = it.GetStart() - startframe
-        end = it.GetEnd() - startframe
-        # this is not robust in the face of time stretching.
-        # Thankfully this is only relevant if someone were to change the speed
-        # of a clip.
-        # TODO(dmo): figure out what this looks like for source clips
-        # with a different framerate than the timeline
-        sourcestartframe = it.GetSourceStartFrame()
 
-        # source start frame of transitions and compositions is undefined
-        if sourcestartframe is None:
-            i = 0
-        else:
-            i = sourcestartframe
-            # davinci will return 0 for both the first frame of the source
-            # and the frame after that. This makes the frame math infuriatingly
-            # special cased. The way to determine if we're inserting from the first
-            # frame is to see if we have any offset available on the left. This
-            # might be bounded by a transition overlay, but for this case, we can
-            # assume that no one is doing transitions on the absolutely first frame
-            # on of a clip
-            if sourcestartframe == 0 and it.GetLeftOffset(False) != 0:
-                sourcestartframe += 1
+    trackcount = timeline.GetTrackCount('video')
+    for tc in range(1, trackcount+1):
+        items = timeline.GetItemListInTrack('video', tc)
+        for it in items:
+            # TODO(dmo) we need to look at file properties. this will especially become
+            # important when we have to work with titles, which will change text
+            name = it.GetName()
+            start = it.GetStart() - startframe
+            end = it.GetEnd() - startframe
+            # this is not robust in the face of time stretching.
+            # Thankfully this is only relevant if someone were to change the speed
+            # of a clip.
+            # TODO(dmo): figure out what this looks like for source clips
+            # with a different framerate than the timeline
+            sourcestartframe = it.GetSourceStartFrame()
 
-        for r in range(start, end):
-            # TODO(dmo): make this a hash of relevant values
-            frames[r].append((name, i))
-            i += 1
+            # source start frame of transitions and compositions is undefined
+            if sourcestartframe is None:
+                i = 0
+            else:
+                i = sourcestartframe
+                # davinci will return 0 for both the first frame of the source
+                # and the frame after that. This makes the frame math infuriatingly
+                # special cased. The way to determine if we're inserting from the first
+                # frame is to see if we have any offset available on the left. This
+                # might be bounded by a transition overlay, but for this case, we can
+                # assume that no one is doing transitions on the absolutely first frame
+                # on of a clip
+                if sourcestartframe == 0 and it.GetLeftOffset(False) != 0:
+                    sourcestartframe += 1
+
+            for r in range(start, end):
+                # TODO(dmo): make this a hash of relevant values
+                frames[r].append((name, i))
+                i += 1
 
     return frames
 
