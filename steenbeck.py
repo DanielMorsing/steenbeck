@@ -12,11 +12,13 @@ import datetime
 from collections import defaultdict
 from python_get_resolve import GetResolve
 
-#TODO(dmo): figure out what this temporary directory actually needs to be
+# TODO(dmo): figure out what this temporary directory actually needs to be
 TEMPDIR = 'C:\\Users\\danie\\Videos\\splicetests\\temporaries'
 
 # compute the longest common subsequence. This will make it possible
 # for us to get the "diff" between the 2 timelines
+
+
 def longestcommonsub(S1, S2):
     m = len(S1)
     n = len(S2)
@@ -51,8 +53,9 @@ def longestcommonsub(S1, S2):
             i -= 1
         else:
             j -= 1
-            
+
     return lcs_algo
+
 
 def FindTimeline(project):
     cnt = project.GetTimelineCount()
@@ -60,25 +63,28 @@ def FindTimeline(project):
         tl = project.GetTimelineByIndex(i)
         if tl.GetName() == args.t:
             return tl
-        
+
     raise Exception(f"Could not find timeline {args.t}")
 
 
-def GetTimelines( project ):
+def GetTimelines(project):
     originalTl = FindTimeline(project)
     targetTl = project.GetCurrentTimeline()
     return originalTl, targetTl
 
-def GetProject( resolve ):
+
+def GetProject(resolve):
     projectManager = resolve.GetProjectManager()
     return projectManager.GetCurrentProject()
+
 
 def FindKeyframe(frames):
     for i in frames:
         if i["flags"] == "K__":
             return i
-    
+
     raise Exception("could not find keyframe")
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-t')
@@ -90,6 +96,7 @@ parser.add_argument('-debugreport', action='store_true')
 
 args = parser.parse_args()
 
+
 def dumpsegments(msg, segs):
     if not args.debuglogs:
         return
@@ -99,12 +106,14 @@ def dumpsegments(msg, segs):
         print(s)
     print()
 
+
 resolve = GetResolve()
 project = GetProject(resolve)
 originalTimeline, targetTimeline = GetTimelines(project)
 
 if originalTimeline.GetStartFrame() != targetTimeline.GetStartFrame():
     raise Exception("differing start frames")
+
 
 def calculateFrameSeq(timeline):
     startframe = timeline.GetStartFrame()
@@ -128,7 +137,7 @@ def calculateFrameSeq(timeline):
         # TODO(dmo): figure out what this looks like for source clips
         # with a different framerate than the timeline
         sourcestartframe = it.GetSourceStartFrame()
-       
+
         # source start frame of transitions and compositions is undefined
         if sourcestartframe is None:
             i = 0
@@ -144,12 +153,13 @@ def calculateFrameSeq(timeline):
             if sourcestartframe == 0 and it.GetLeftOffset(False) != 0:
                 sourcestartframe += 1
 
-        for r in range(start,end):
-            #TODO(dmo): make this a hash of relevant values
-            frames[r].append((name,i))
+        for r in range(start, end):
+            # TODO(dmo): make this a hash of relevant values
+            frames[r].append((name, i))
             i += 1
 
     return frames
+
 
 # run through every frame of the video, creating a hash of the current frame
 # properties. This is horribly inefficient, but the alternative
@@ -168,6 +178,8 @@ lcs = longestcommonsub(originalFrames, targetFrames)
 #
 # for target segments, we use the frame number of the timeline we read
 # from resolve
+
+
 class segment:
     def __init__(self, originalframe, positiondelta, duration):
         self.originalframe = originalframe
@@ -176,18 +188,26 @@ class segment:
 
         self.inKeyframe = None
         self.outKeyframe = None
+
     def __repr__(self) -> str:
         return f"<{type(self).__name__} of:{self.originalframe} delta:{self.positiondelta} dur:{self.duration} inframe:{self.inKeyframe} outframe:{self.outKeyframe}>"
 
+
 class original(segment):
     pass
+
+
 class target(segment):
     pass
 
+
 segments = []
 s, i, j = 0, 0, 0
+
+
 def sequenceleft():
     return s < len(lcs) and i < len(originalFrames) and j < len(targetFrames)
+
 
 while sequenceleft():
     # walk sequences until we don't match
@@ -201,17 +221,17 @@ while sequenceleft():
 
     if not sequenceleft():
         break
-    
+
     # this is an insertion, walk target frames until we
     # match and emit a target segment
-    if lcs[s] != targetFrames[j]:        
+    if lcs[s] != targetFrames[j]:
         oldj = j
         while lcs[s] != targetFrames[j]:
             j += 1
         segments.append(target(oldj, 0, j-oldj))
 
     # deletion, walk until we match up again
-    if lcs[s] != originalFrames[i]:    
+    if lcs[s] != originalFrames[i]:
         while lcs[s] != originalFrames[i]:
             i += 1
 
@@ -273,7 +293,8 @@ packets = sorted(list(bypts.values()), key=lambda x: x["pts"])
 # ffmpeg packet timestamps
 d, q = stream["time_base"].split('/')
 if int(d) != 1:
-    raise Exception("life is too short to do timebase math for a silly optimization")
+    raise Exception(
+        "life is too short to do timebase math for a silly optimization")
 timebase = int(q)
 
 # grab the framerate, we will use this later for NTSC
@@ -286,25 +307,29 @@ framerate = int(d)
 # TODO(dmo): clean up, this is ugly
 ptsperframe = timebase/framerate
 
+
 def islastframe(pkt):
     return pkt["pts"] + pkt["duration"] == stream["duration_ts"]
+
 
 def findprevKeyframe(packets, i):
     for j in reversed(range(i)):
         if packets[j]["flags"] == "K__":
             return packets[j]["pts"]
 
+
 def findnextKeyframe(packets, i):
     for j in range(i, len(packets)):
         if packets[j]["flags"] == "K__":
             return packets[j]["pts"]
-    
+
     # reached the end of the packet stream. We can get here
     # either by not finding a keyframe or reaching the end
     # of the video file
     if islastframe(packets[j]):
         return packets[j]["pts"]
     raise Exception("did not find following keyframe")
+
 
 for i, p in enumerate(packets):
     framenum = p["pts"]/ptsperframe
@@ -323,7 +348,7 @@ for i, s in enumerate(segments):
     if isinstance(s, target):
         continue
     if s.inKeyframe >= s.outKeyframe:
-        segments[i] = target(s.originalframe + s.positiondelta, 0, s.duration) 
+        segments[i] = target(s.originalframe + s.positiondelta, 0, s.duration)
 
 dumpsegments("after overlap target morph", segments)
 
@@ -351,10 +376,10 @@ if targetaccum != None:
 segments = newsegments
 dumpsegments("segment list before keyframe nudges", segments)
 
-# create a new sequence with the in and out points 
+# create a new sequence with the in and out points
 # of our segments nudged based on the data we found from ffmpeg
 # TODO(dmo): figure out how this works in corner cases where an outkeyframe is
-# before the beginning of the segment or a inkeyframe is after an outkeyframe 
+# before the beginning of the segment or a inkeyframe is after an outkeyframe
 for i, s in enumerate(segments):
     if isinstance(s, target):
         continue
@@ -404,7 +429,8 @@ for s in segments:
     length += s.duration
 
 if length != targetTimeline.GetEndFrame() - targetTimeline.GetStartFrame():
-    raise Exception("made a sequence that is not same length as intended result, contact developer")
+    raise Exception(
+        "made a sequence that is not same length as intended result, contact developer")
 
 # strip audio from the concatenation input
 # the concatenation demuxer can get confused if it
@@ -422,12 +448,15 @@ command = [
 res = subprocess.run(command)
 
 # look for the latest render job that matches the video file
+
+
 def findRender(renders):
     for r in reversed(renders):
         if r["TargetDir"] + '\\' + r["OutputFilename"] == args.f:
             return r
-        
+
     raise Exception("couldn't find template render")
+
 
 # use the last render as a template for our glue files
 templateRender = findRender(project.GetRenderJobList())
@@ -441,7 +470,7 @@ for i, s in enumerate(segments):
             "FormatHeight": templateRender["FormatHeight"],
             "MarkIn": originalTimeline.GetStartFrame() + targetstart,
             "MarkOut": originalTimeline.GetStartFrame() + (targetstart+s.duration)-1,
-            #TODO(dmo): figure out where to store this temporary file
+            # TODO(dmo): figure out where to store this temporary file
             'TargetDir': TEMPDIR,
             'CustomName': f'glue{i}.mov'
         }
@@ -471,7 +500,8 @@ for i, s in enumerate(segments):
         # and the outpoint is exclusive, so we need to specify the frame before the keyframe
         # Also, specify a duration since without this, it will take use the outpoint
         # and mess up the presentation timestamp for the following file
-        splicelines.append(f"outpoint {(s.originalframe+s.duration-1)/framerate}")
+        splicelines.append(
+            f"outpoint {(s.originalframe+s.duration-1)/framerate}")
         splicelines.append(f"duration {s.duration/framerate}")
     else:
         if s.duration <= 0:
