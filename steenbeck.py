@@ -422,9 +422,13 @@ def calculateFrameSeq(timeline):
     for tc in range(1, trackcount+1):
         items = timeline.GetItemListInTrack('video', tc)
         for it in items:
-            # TODO(dmo) we need to look at file properties. this will especially become
-            # important when we have to work with titles, which will change text
             name = it.GetName()
+            mpi = it.GetMediaPoolItem()
+            if mpi is not None:
+                mid = mpi.GetMediaId()
+                name = mid
+
+            # TODO(dmo): add whatever properties we can get to our frame calculation
             start = it.GetStart() - startframe
             end = it.GetEnd() - startframe
             # this is not robust in the face of time stretching.
