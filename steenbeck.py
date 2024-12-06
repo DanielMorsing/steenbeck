@@ -55,7 +55,7 @@ def steenbeck():
 
     lcs = longestcommonsub(originalFrames, targetFrames)
 
-    # turn out LCS into a list of segments. These segments
+    # turn our LCS into a list of segments. These segments
     # are either "original" or "target" segments.
     # for original segments, we use the frame number, 0-indexed of the
     # video file on disk
