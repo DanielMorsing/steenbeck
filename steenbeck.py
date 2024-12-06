@@ -398,6 +398,21 @@ for s in segments:
 if length != targetTimeline.GetEndFrame() - targetTimeline.GetStartFrame():
     raise Exception("made a sequence that is not same length as intended result, contact developer")
 
+# strip audio from the concatenation input
+# the concatenation demuxer can get confused if it
+# encounters audio packets and we're adding the audio
+# back later anyway
+basefile = f"{TEMPDIR}\\base.mov"
+command = [
+    "./ffmpeg.exe",
+    "-y",
+    "-i", args.f,
+    "-c", "copy",
+    "-map", "0:v",
+    basefile
+]
+res = subprocess.run(command)
+
 # look for the latest render job that matches the video file
 def findRender(renders):
     for r in reversed(renders):
@@ -442,7 +457,7 @@ for i, s in enumerate(segments):
     if isinstance(s, original):
         if s.duration <= 0:
             continue
-        splicelines.append(f"file '{args.f}'")
+        splicelines.append(f"file '{basefile}'")
         splicelines.append(f"inpoint {s.originalframe/framerate}")
         # ffmpeg goes by decode timestamp when determining when to stop concatenating
         # and the outpoint is exclusive, so we need to specify the frame before the keyframe
@@ -477,7 +492,7 @@ command = [
     "-f", "concat",
     "-i", fileloc,
     "-c", "copy",
-    # TODO(dmo): for some weird ffmpeg produces a stupid file if we select audio
+    # TODO(dmo): select a prerendered audio stream
     "-map", "0:v:0",
     outputfile
 ]
