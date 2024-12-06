@@ -106,51 +106,59 @@ originalTimeline, targetTimeline = GetTimelines(project)
 if originalTimeline.GetStartFrame() != targetTimeline.GetStartFrame():
     raise Exception("differing start frames")
 
-# run through every frame of the video, creating a hash of the current frame
-# properties. This is horribly inefficient, but the alternative
-# is to actually do the maths for insertion and doing "data structures"
-# and "computer science". Life's too short
-# TODO(dmo): this is special cased to only handle one track right now
-originalitems = originalTimeline.GetItemListInTrack('video', 1)
-targetitems = targetTimeline.GetItemListInTrack('video', 1)
-
-def calculateFrameSeq(items):
+def calculateFrameSeq(timeline):
+    startframe = timeline.GetStartFrame()
+    tlduration = timeline.GetEndFrame() - startframe
     frames = []
-    for i in items:
+    for _ in range(tlduration):
+        frames.append([])
+    items = timeline.GetItemListInTrack('video', 1)
+    for it in items:
         # TODO(dmo): when we make this work for multiple tracks, this
         # obviously has to change. It is not guaranteed to be contiguous over
         # every frame
         # also, we need to look at file properties. this will especially become
         # important when we have to work with titles, which will change text
-        name = i.GetName()
-        start = i.GetStart()
-        end = i.GetEnd()
+        name = it.GetName()
+        start = it.GetStart() - startframe
+        end = it.GetEnd() - startframe
         # this is not robust in the face of time stretching.
         # Thankfully this is only relevant if someone were to change the speed
         # of a clip.
         # TODO(dmo): figure out what this looks like for source clips
         # with a different framerate than the timeline
-        sourcestartframe = i.GetSourceStartFrame()
-        # davinci will return 0 for both the first frame of the source
-        # and the frame after that. This makes the frame math infuriatingly
-        # special cased. The way to determine if we're inserting from the first
-        # frame is to see if we have any offset available on the left. This
-        # might be bounded by a transition overlay, but for this case, we can
-        # assume that no one is doing transitions on the absolutely first frame
-        # on of a clip
-        if sourcestartframe == 0 and i.GetLeftOffset(False) != 0:
-            sourcestartframe += 1
+        sourcestartframe = it.GetSourceStartFrame()
+       
+        # source start frame of transitions and compositions is undefined
+        if sourcestartframe is None:
+            i = 0
+        else:
+            i = sourcestartframe
+            # davinci will return 0 for both the first frame of the source
+            # and the frame after that. This makes the frame math infuriatingly
+            # special cased. The way to determine if we're inserting from the first
+            # frame is to see if we have any offset available on the left. This
+            # might be bounded by a transition overlay, but for this case, we can
+            # assume that no one is doing transitions on the absolutely first frame
+            # on of a clip
+            if sourcestartframe == 0 and it.GetLeftOffset(False) != 0:
+                sourcestartframe += 1
 
-        i = sourcestartframe
         for r in range(start,end):
             #TODO(dmo): make this a hash of relevant values
-            frames.append((name,i))
+            frames[r].append((name,i))
             i += 1
 
     return frames
 
-originalFrames = calculateFrameSeq(originalitems)
-targetFrames = calculateFrameSeq(targetitems)
+# run through every frame of the video, creating a hash of the current frame
+# properties. This is horribly inefficient, but the alternative
+# is to actually do the maths for insertion and doing "data structures"
+# and "computer science". Life's too short
+# TODO(dmo): this is special cased to only handle one track right now
+originalFrames = calculateFrameSeq(originalTimeline)
+targetFrames = calculateFrameSeq(targetTimeline)
+
 lcs = longestcommonsub(originalFrames, targetFrames)
 
 # turn out LCS into a list of segments. These segments
