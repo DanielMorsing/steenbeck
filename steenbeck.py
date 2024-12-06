@@ -506,7 +506,7 @@ def FindTimeline(project, timelinename):
         if tl.GetName() == timelinename:
             return tl
 
-    raise Exception(f"Could not find timeline {args.t}")
+    raise Exception(f"Could not find timeline {timelinename}")
 
 
 def GetTimelines(project, origtimeline):
