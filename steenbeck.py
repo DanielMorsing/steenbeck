@@ -9,7 +9,6 @@ import json
 import argparse
 import time
 import datetime
-from collections import defaultdict
 from python_get_resolve import GetResolve
 
 # TODO(dmo): figure out what this temporary directory actually needs to be
