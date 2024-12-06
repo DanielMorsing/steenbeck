@@ -49,7 +49,6 @@ def steenbeck():
     # properties. This is horribly inefficient, but the alternative
     # is to actually do the maths for insertion and doing "data structures"
     # and "computer science". Life's too short
-    # TODO(dmo): this is special cased to only handle one track right now
     originalFrames = calculateFrameSeq(originalTimeline)
     targetFrames = calculateFrameSeq(targetTimeline)
 
@@ -131,7 +130,7 @@ def steenbeck():
             s.outKeyframe = outframe
 
     # construct an interval string for ffmpeg.
-    # Seeking will give us the first keyframe previous to the seek point
+    # Seeking will give us the first keyframe previous to the seek point.
     # 100 frames after is a guess for when we will see a keyframe again.
     framerate = targetTimeline.GetSetting("timelineFrameRate")
     intervals = []
@@ -143,7 +142,7 @@ def steenbeck():
         intervals.append(f"{second}%+#100")
     intervalstr = ",".join(intervals)
 
-    # invoke ffmpeg and have it give us the frames that
+    # invoke ffmpeg to find out where the keyframes are
     command = [
         "./ffprobe.exe",
         "-print_format", "json",
@@ -173,8 +172,10 @@ def steenbeck():
             "life is too short to do timebase math for a silly optimization")
     timebase = int(q)
 
-    # grab the framerate, we will use this later for NTSC
+    # grab the framerate, luckily we know these files are one
+    # framerate, since davinci only supports fixed framerates
     d, q = stream["avg_frame_rate"].split('/')
+    # TODO(dmo): figure out NTSC video
     if int(q) != 1:
         raise Exception("I will figure out NTSC video later")
     framerate = int(d)
@@ -251,8 +252,6 @@ def steenbeck():
 
     # create a new sequence with the in and out points
     # of our segments nudged based on the data we found from ffmpeg
-    # TODO(dmo): figure out how this works in corner cases where an outkeyframe is
-    # before the beginning of the segment or a inkeyframe is after an outkeyframe
     for i, s in enumerate(segments):
         if isinstance(s, target):
             continue
