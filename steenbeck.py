@@ -430,18 +430,15 @@ def calculateFrameSeq(timeline):
 
             start = it.GetStart() - startframe
             end = it.GetEnd() - startframe
-            # this is not robust in the face of time stretching.
-            # Thankfully this is only relevant if someone were to change the speed
-            # of a clip.
-            # TODO(dmo): figure out what this looks like for source clips
-            # with a different framerate than the timeline
 
+            # TODO(dmo): figure out what this works for source clips
+            # with a different framerate than the timeline
             sourcestartframe = it.GetSourceStartFrame()
-            # source start frame of transitions and compositions is undefined
-            if sourcestartframe is None:
-                i = 0
-            else:
-                i = sourcestartframe
+            sourceendframe = it.GetSourceEndFrame()
+            # items that are not clips always start at 0 and runs at 1 frame per timeline frame
+            sourceidx = 0
+            frameduration = 1
+            if sourcestartframe is not None:
                 # davinci will return 0 for both the first frame of the source
                 # and the frame after that. This makes the frame math infuriatingly
                 # special cased. The way to determine if we're inserting from the first
@@ -451,6 +448,11 @@ def calculateFrameSeq(timeline):
                 # on of a clip
                 if sourcestartframe == 0 and it.GetLeftOffset(False) != 0:
                     sourcestartframe += 1
+
+                # The source clip might be a different framerate than the timeline
+                # so calculate the frame duration
+                sourceidx = sourcestartframe
+                frameduration = (sourceendframe - sourcestartframe)/(end-start)
 
             # Get all the properties about this timeline item that we can find
             # This will be added to a running hash that we keep for every
@@ -479,8 +481,8 @@ def calculateFrameSeq(timeline):
                 else:
                     hash.update(basehashdata)
 
-                hash.update(marshal.dumps(i))
-                i += 1
+                hash.update(marshal.dumps(sourceidx))
+                sourceidx += frameduration
                 frames[r] = hash
 
     return [f.digest() for f in frames]
