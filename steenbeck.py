@@ -85,11 +85,18 @@ def steenbeck():
     s, i, j = 0, 0, 0
 
     def sequenceleft():
-        return s < len(lcs) and i < len(originalFrames) and j < len(targetFrames)
+        return s < len(lcs) or i < len(originalFrames) or j < len(targetFrames)
+
+    def noneindex(arr, idx):
+        if idx >= len(arr):
+            return None
+        else:
+            return arr[idx]
+
     while sequenceleft():
         # walk sequences until we don't match
         oldi = i
-        while sequenceleft() and (lcs[s] == originalFrames[i] == targetFrames[j]):
+        while sequenceleft() and noneindex(lcs, s) == noneindex(originalFrames, i) == noneindex(targetFrames, j):
             s += 1
             i += 1
             j += 1
@@ -101,15 +108,15 @@ def steenbeck():
 
         # this is an insertion, walk target frames until we
         # match and emit a target segment
-        if lcs[s] != targetFrames[j]:
+        if noneindex(lcs, s) != noneindex(targetFrames, j):
             oldj = j
-            while lcs[s] != targetFrames[j]:
+            while noneindex(lcs, s) != noneindex(targetFrames, j):
                 j += 1
             segments.append(target(oldj, 0, j-oldj))
 
         # deletion, walk until we match up again
-        if lcs[s] != originalFrames[i]:
-            while lcs[s] != originalFrames[i]:
+        if noneindex(lcs, s) != noneindex(originalFrames, i):
+            while noneindex(lcs, s) != noneindex(originalFrames, i):
                 i += 1
 
     dumpsegments("segment list before keyframe search", segments)
@@ -431,13 +438,7 @@ def calculateFrameSeq(timeline):
             start = it.GetStart() - startframe
             end = it.GetEnd() - startframe
 
-            # TODO(dmo): figure out what this works for source clips
-            # with a different framerate than the timeline
             sourcestartframe = it.GetSourceStartFrame()
-            sourceendframe = it.GetSourceEndFrame()
-            # items that are not clips always start at 0 and runs at 1 frame per timeline frame
-            sourceidx = 0
-            frameduration = 1
             if sourcestartframe is not None:
                 # davinci will return 0 for both the first frame of the source
                 # and the frame after that. This makes the frame math infuriatingly
@@ -449,11 +450,6 @@ def calculateFrameSeq(timeline):
                 if sourcestartframe == 0 and it.GetLeftOffset(False) != 0:
                     sourcestartframe += 1
 
-                # The source clip might be a different framerate than the timeline
-                # so calculate the frame duration
-                sourceidx = sourcestartframe
-                frameduration = (sourceendframe - sourcestartframe)/(end-start)
-
             # Get all the properties about this timeline item that we can find
             # This will be added to a running hash that we keep for every
             # frame in the timeline
@@ -463,9 +459,10 @@ def calculateFrameSeq(timeline):
             props = dict(sorted(props.items()))
             # I know I'm not supposed to use marshal, but this is just a convenient
             # binary representation of a dictionary
-            basehashdata = marshal.dumps({
+            hashdata = marshal.dumps({
                 "name": name,
-                "props": props
+                "props": props,
+                "frame": sourcestartframe,
             })
             # if the frame has yet to have a hash assigned, use a copy
             # to instantiate it. We lazily instantiate this later if needed
@@ -476,13 +473,17 @@ def calculateFrameSeq(timeline):
                 if hash is None:
                     if basehash is None:
                         basehash = hashlib.sha256(
-                            basehashdata, usedforsecurity=False)
+                            hashdata, usedforsecurity=False)
                     hash = basehash.copy()
                 else:
-                    hash.update(basehashdata)
+                    hash.update(hashdata)
 
-                hash.update(marshal.dumps(sourceidx))
-                sourceidx += frameduration
+                # TODO(dmo): figure out if we can calculate mapping from frame number to
+                # source clip frame number. This would make it possible to discover sequences outside
+                # just cut boundaries. We used to have this feature, but it was impossible to determine
+                # when the timeline and source clip framerate didn't match.
+                # Every attempt ended up with a mismatch.
+
                 frames[r] = hash
 
     return [f.digest() for f in frames]
