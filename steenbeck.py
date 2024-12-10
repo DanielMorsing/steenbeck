@@ -12,6 +12,8 @@ import json
 import argparse
 import time
 import datetime
+import hashlib
+import marshal
 from python_get_resolve import GetResolve
 
 
@@ -410,13 +412,11 @@ def steenbeck():
 
 def calculateFrameSeq(timeline):
     """
-    calculateFrameSeq returns an array of arrays, each representing a frame in the timeline.
+    calculateFrameSeq returns an array of hashes, each representing a frame in the timeline.
     """
     startframe = timeline.GetStartFrame()
     tlduration = timeline.GetEndFrame() - startframe
-    frames = []
-    for _ in range(tlduration):
-        frames.append([])
+    frames = [None] * tlduration
 
     trackcount = timeline.GetTrackCount('video')
     for tc in range(1, trackcount+1):
@@ -428,7 +428,6 @@ def calculateFrameSeq(timeline):
                 mid = mpi.GetMediaId()
                 name = mid
 
-            # TODO(dmo): add whatever properties we can get to our frame calculation
             start = it.GetStart() - startframe
             end = it.GetEnd() - startframe
             # this is not robust in the face of time stretching.
@@ -436,8 +435,8 @@ def calculateFrameSeq(timeline):
             # of a clip.
             # TODO(dmo): figure out what this looks like for source clips
             # with a different framerate than the timeline
-            sourcestartframe = it.GetSourceStartFrame()
 
+            sourcestartframe = it.GetSourceStartFrame()
             # source start frame of transitions and compositions is undefined
             if sourcestartframe is None:
                 i = 0
@@ -453,12 +452,38 @@ def calculateFrameSeq(timeline):
                 if sourcestartframe == 0 and it.GetLeftOffset(False) != 0:
                     sourcestartframe += 1
 
-            for r in range(start, end):
-                # TODO(dmo): make this a hash of relevant values
-                frames[r].append((name, i))
-                i += 1
+            # Get all the properties about this timeline item that we can find
+            # This will be added to a running hash that we keep for every
+            # frame in the timeline
+            props = it.GetProperty()
+            # I don't think resolve will give out dicts in random order
+            # but let's be safe
+            props = dict(sorted(props.items()))
+            # I know I'm not supposed to use marshal, but this is just a convenient
+            # binary representation of a dictionary
+            basehashdata = marshal.dumps({
+                "name": name,
+                "props": props
+            })
+            # if the frame has yet to have a hash assigned, use a copy
+            # to instantiate it. We lazily instantiate this later if needed
+            basehash = None
 
-    return frames
+            for r in range(start, end):
+                hash = frames[r]
+                if hash is None:
+                    if basehash is None:
+                        basehash = hashlib.sha256(
+                            basehashdata, usedforsecurity=False)
+                    hash = basehash.copy()
+                else:
+                    hash.update(basehashdata)
+
+                hash.update(marshal.dumps(i))
+                i += 1
+                frames[r] = hash
+
+    return [f.digest() for f in frames]
 
 
 def longestcommonsub(S1, S2):
