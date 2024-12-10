@@ -478,7 +478,7 @@ def calculateFrameSeq(timeline):
                 else:
                     hash.update(hashdata)
 
-                # TODO(dmo): figure out if we can calculate mapping from frame number to
+                # TODO(dmo): figure out if we can calculate mapping from timeline frame number to
                 # source clip frame number. This would make it possible to discover sequences outside
                 # just cut boundaries. We used to have this feature, but it was impossible to determine
                 # when the timeline and source clip framerate didn't match.
