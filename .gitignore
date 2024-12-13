@@ -3,4 +3,5 @@ ffmpeg.exe
 ffprobe.exe
 splice.txt
 output-*-*.mov
+output-*-*.mp4
 *.log
