@@ -431,6 +431,7 @@ def steenbeck():
         "-f", "concat",
         "-i", fileloc,
         "-c", "copy",
+        "-map", "0:v:0",
         videofile
     ]
     command = [i for i in command if i is not None]
