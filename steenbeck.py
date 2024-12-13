@@ -14,6 +14,7 @@ import time
 import datetime
 import hashlib
 import marshal
+import os
 from python_get_resolve import GetResolve
 
 
@@ -25,6 +26,7 @@ def steenbeck():
     parser.add_argument('-t')
     parser.add_argument('-f')
     parser.add_argument('-o')
+    parser.add_argument('-renderpreset')
     parser.add_argument('-debuglogs', action='store_true')
     parser.add_argument('-debuguniquename', action='store_true')
     parser.add_argument('-debugreport', action='store_true')
@@ -317,7 +319,8 @@ def steenbeck():
     # the concatenation demuxer can get confused if it
     # encounters audio packets and we're adding the audio
     # back later anyway
-    basefile = f"{TEMPDIR}\\base.mov"
+    _, ext = os.path.splitext(args.f)
+    basefile = f"{TEMPDIR}\\base{ext}"
     command = [
         "./ffmpeg.exe",
         "-y",
@@ -327,32 +330,41 @@ def steenbeck():
         basefile
     ]
     res = subprocess.run(command)
+    if res.returncode != 0:
+        raise Exception(f"failed audio strip")
 
-    # look for the latest render job that matches the video file
+    res = project.LoadRenderPreset(args.renderpreset)
+    if res == False:
+        raise Exception(f"couldn't find render preset {args.renderpreset}")
 
-    def findRender(renders):
-        for r in reversed(renders):
-            if r["TargetDir"] + '\\' + r["OutputFilename"] == args.f:
-                return r
-
-        raise Exception("couldn't find template render")
-
-    # use the last render as a template for our glue files
-    templateRender = findRender(project.GetRenderJobList())
     jobs = []
+    AUDIOBASE = "audio"
+    audiorender = {
+        "ExportAudio": True,
+        "ExportVideo": False,
+        "MarkIn": originalTimeline.GetStartFrame(),
+        "MarkOut": originalTimeline.GetEndFrame(),
+        # TODO(dmo): figure out where to store this temporary file
+        'TargetDir': TEMPDIR,
+        'CustomName': AUDIOBASE
+    }
+    project.SetRenderSettings(audiorender)
+    job = project.AddRenderJob()
+    jobs.append(job)
+
     for i, s in enumerate(segments):
         if isinstance(s, target):
             targetstart = s.originalframe + s.positiondelta
             rendersettings = {
-                "IsExportAudio": False,
-                "FormatWidth": templateRender["FormatWidth"],
-                "FormatHeight": templateRender["FormatHeight"],
+                "ExportVideo": True,
+                "ExportAudio": False,
                 "MarkIn": originalTimeline.GetStartFrame() + targetstart,
                 "MarkOut": originalTimeline.GetStartFrame() + (targetstart+s.duration)-1,
                 # TODO(dmo): figure out where to store this temporary file
                 'TargetDir': TEMPDIR,
-                'CustomName': f'glue{i}.mov'
+                'CustomName': f'glue{i}'
             }
+            project.LoadRenderPreset(args.renderpreset)
             project.SetRenderSettings(rendersettings)
             job = project.AddRenderJob()
             jobs.append(job)
@@ -385,22 +397,19 @@ def steenbeck():
         else:
             if s.duration <= 0:
                 raise Exception("zero length 'to' segment, contact developer")
-            splicelines.append(f"file '{TEMPDIR}\\glue{i}.mov'")
+            splicelines.append(f"file '{TEMPDIR}\\glue{i}{ext}'")
             splicelines.append(f"duration {s.duration/framerate}")
 
     fileloc = f"{TEMPDIR}\\splice.txt"
     with open(fileloc, "w") as splicefile:
         splicefile.write("\n".join(splicelines))
 
-    outputfile = args.o
-    if args.debuguniquename:
-        now = datetime.datetime.now()
-        outputfile = f"output-{now.strftime("%y%m%d-%H%M%S")}.mov"
-
     reportflag = None
     if args.debugreport:
         reportflag = "-report"
 
+    # TODO(dmo): figure out if we can do this remux in one go
+    videofile = f"{TEMPDIR}\\videoonly{ext}"
     command = [
         "./ffmpeg.exe",
         "-y",
@@ -409,8 +418,25 @@ def steenbeck():
         "-f", "concat",
         "-i", fileloc,
         "-c", "copy",
-        # TODO(dmo): select a prerendered audio stream
+        videofile
+    ]
+    command = [i for i in command if i is not None]
+    res = subprocess.run(command)
+
+    outputfile = args.o
+    if args.debuguniquename:
+        now = datetime.datetime.now()
+        outputfile = f"output-{now.strftime("%y%m%d-%H%M%S")}{ext}"
+
+    command = [
+        "./ffmpeg.exe",
+        "-y",
+        reportflag,
+        "-i", videofile,
+        "-i", f"{TEMPDIR}\\{AUDIOBASE}{ext}",
+        "-c", "copy",
         "-map", "0:v:0",
+        "-map", "1",
         outputfile
     ]
     command = [i for i in command if i is not None]
