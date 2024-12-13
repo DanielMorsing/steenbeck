@@ -74,6 +74,13 @@ def steenbeck():
             self.inKeyframe = None
             self.outKeyframe = None
 
+            # delta in seconds between presentation timestamp
+            # and decode timestamp for the out keyframes. This is important
+            # because the concat demuxer decides when to stop reading on the
+            # DTS rather than the PTS and it can be an arbitrary time before
+            # the actual keyframe.
+            self.outKfDelta = None
+
         def __repr__(self) -> str:
             return f"<{type(self).__name__} of:{self.originalframe} delta:{self.positiondelta} dur:{self.duration} inframe:{self.inKeyframe} outframe:{self.outKeyframe}>"
 
@@ -139,6 +146,7 @@ def steenbeck():
             outKeyframe[outframe] = s
         else:
             s.outKeyframe = outframe
+            s.outKfDelta = 0
 
     # construct an interval string for ffmpeg.
     # Seeking will give us the first keyframe previous to the seek point.
@@ -201,12 +209,12 @@ def steenbeck():
     def findprevKeyframe(packets, i):
         for j in reversed(range(i)):
             if packets[j]["flags"] == "K__":
-                return packets[j]["pts"]
+                return packets[j]
 
     def findnextKeyframe(packets, i):
         for j in range(i, len(packets)):
             if packets[j]["flags"] == "K__":
-                return packets[j]["pts"]
+                return packets[j]
 
         # reached the end of the packet stream. We can get here
         # either by not finding a keyframe or reaching the end
@@ -218,11 +226,15 @@ def steenbeck():
     for i, p in enumerate(packets):
         framenum = p["pts"]/ptsperframe
         if framenum in inKeyframe:
-            keyframe = findnextKeyframe(packets, i)/ptsperframe
+            keyframepkt = findnextKeyframe(packets, i)
+            keyframe = keyframepkt["pts"]/ptsperframe
             inKeyframe[framenum].inKeyframe = keyframe
         if framenum in outKeyframe:
-            keyframe = findprevKeyframe(packets, i)/ptsperframe
+            keyframepkt = findprevKeyframe(packets, i)
+            keyframe = keyframepkt["pts"]/ptsperframe
+            decdelta = (keyframepkt["dts"]-keyframepkt["pts"])/timebase
             outKeyframe[framenum].outKeyframe = keyframe
+            outKeyframe[framenum].outKfDelta = decdelta
 
     dumpsegments("after keyframe search", segments)
 
@@ -391,8 +403,9 @@ def steenbeck():
             # and the outpoint is exclusive, so we need to specify the frame before the keyframe
             # Also, specify a duration since without this, it will take use the outpoint
             # and mess up the presentation timestamp for the following file
-            splicelines.append(
-                f"outpoint {(s.originalframe+s.duration-1)/framerate}")
+            outpoint = (s.originalframe+s.duration)/framerate
+            outpoint += s.outKfDelta
+            splicelines.append(f"outpoint {outpoint}")
             splicelines.append(f"duration {s.duration/framerate}")
         else:
             if s.duration <= 0:
@@ -437,6 +450,9 @@ def steenbeck():
         "-c", "copy",
         "-map", "0:v:0",
         "-map", "1",
+        # TODO(dmo): ffmpeg mp4 muxer doesn't like the aux data that
+        # BMD puts into their files. Strip the data streams
+        "-map", "-1:d",
         outputfile
     ]
     command = [i for i in command if i is not None]

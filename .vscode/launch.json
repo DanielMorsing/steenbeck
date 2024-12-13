@@ -15,8 +15,8 @@
                      "-debuglogs",
                      "-debuguniquename",
                      "-debugreport",
-                     "-f", "C:\\Users\\danie\\Videos\\splicetests\\firstversion.mov",
-                     "-o", "output.mov"]
+                     "-f", "C:\\Users\\danie\\Videos\\splicetests\\firstversion.mp4",
+                     "-o", "output.mp4"]
         }
     ]
 }
