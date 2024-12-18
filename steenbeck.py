@@ -15,6 +15,8 @@ import datetime
 import hashlib
 import marshal
 import os
+import fractions
+import math
 from python_get_resolve import GetResolve
 
 
@@ -49,6 +51,9 @@ def steenbeck():
     if originalTimeline.GetStartFrame() != targetTimeline.GetStartFrame():
         raise Exception("differing start frames")
 
+    if originalTimeline.GetSetting("timelineFrameRate") != targetTimeline.GetSetting("timelineFrameRate"):
+        raise Exception(f"differing framerates")
+
     # run through every frame of the video, creating a hash of the current frame
     # properties. This is horribly inefficient, but the alternative
     # is to actually do the maths for insertion and doing "data structures"
@@ -74,11 +79,16 @@ def steenbeck():
             self.inKeyframe = None
             self.outKeyframe = None
 
-            # delta in seconds between presentation timestamp
+            # delta frames between presentation timestamp
             # and decode timestamp for the out keyframes. This is important
             # because the concat demuxer decides when to stop reading on the
             # DTS rather than the PTS and it can be an arbitrary time before
             # the actual keyframe.
+            #
+            # Note that while the delta in the packet stream is in time base units
+            # and doesn't necessarily line up with frames, we use frames here because
+            # we do all our maths in it. The math is done in fractions anyway to deal with
+            # NTSC, so no detail is lost
             self.outKfDelta = None
 
         def __repr__(self) -> str:
@@ -186,22 +196,14 @@ def steenbeck():
     # find the timebase, we use this to go from davinci frame numbers to
     # ffmpeg packet timestamps
     d, q = stream["time_base"].split('/')
-    if int(d) != 1:
-        raise Exception(
-            "life is too short to do timebase math for a silly optimization")
-    timebase = int(q)
+    timebase = fractions.Fraction(int(d), int(q))
 
     # grab the framerate, luckily we know these files are one
     # framerate, since davinci only supports fixed framerates
     d, q = stream["avg_frame_rate"].split('/')
-    # TODO(dmo): figure out NTSC video
-    if int(q) != 1:
-        raise Exception("I will figure out NTSC video later")
-    framerate = int(d)
+    framerate = fractions.Fraction(int(d), int(q))
 
-    # find all the keyframes that we need before a given point
-    # TODO(dmo): clean up, this is ugly
-    ptsperframe = timebase/framerate
+    ptsperframe = (1/framerate)/timebase
 
     def islastframe(pkt):
         return pkt["pts"] + pkt["duration"] == stream["duration_ts"]
@@ -232,7 +234,7 @@ def steenbeck():
         if framenum in outKeyframe:
             keyframepkt = findprevKeyframe(packets, i)
             keyframe = keyframepkt["pts"]/ptsperframe
-            decdelta = (keyframepkt["dts"]-keyframepkt["pts"])/timebase
+            decdelta = (keyframepkt["dts"]-keyframepkt["pts"])/ptsperframe
             outKeyframe[framenum].outKeyframe = keyframe
             outKeyframe[framenum].outKfDelta = decdelta
 
@@ -370,8 +372,8 @@ def steenbeck():
             rendersettings = {
                 "ExportVideo": True,
                 "ExportAudio": False,
-                "MarkIn": originalTimeline.GetStartFrame() + targetstart,
-                "MarkOut": originalTimeline.GetStartFrame() + (targetstart+s.duration)-1,
+                "MarkIn": int(originalTimeline.GetStartFrame() + targetstart),
+                "MarkOut": int(originalTimeline.GetStartFrame() + (targetstart+s.duration)-1),
                 # TODO(dmo): figure out where to store this temporary file
                 'TargetDir': TEMPDIR,
                 'CustomName': f'glue{i}'
@@ -391,6 +393,13 @@ def steenbeck():
         if status['JobStatus'] != 'Complete':
             raise Exception(f"{j} render failed")
 
+    def durstring(framenum: fractions.Fraction) -> str:
+        posSecond = framenum/framerate
+        # microsecond is the smallest unit that ffmpeg parses
+        # so use it and discard any fractional component
+        us = 1_000_000 * posSecond
+        return f"{math.floor(us)}us"
+
     # generate file for ffmpeg concat demuxer
     splicelines = []
     for i, s in enumerate(segments):
@@ -398,20 +407,20 @@ def steenbeck():
             if s.duration <= 0:
                 continue
             splicelines.append(f"file '{basefile}'")
-            splicelines.append(f"inpoint {s.originalframe/framerate}")
+            splicelines.append(f"inpoint {durstring(s.originalframe)}")
             # ffmpeg goes by decode timestamp when determining when to stop concatenating
             # and the outpoint is exclusive, so we need to specify the frame before the keyframe
             # Also, specify a duration since without this, it will take use the outpoint
             # and mess up the presentation timestamp for the following file
-            outpoint = (s.originalframe+s.duration)/framerate
+            outpoint = s.originalframe+s.duration
             outpoint += s.outKfDelta
-            splicelines.append(f"outpoint {outpoint}")
-            splicelines.append(f"duration {s.duration/framerate}")
+            splicelines.append(f"outpoint {durstring(outpoint)}")
+            splicelines.append(f"duration {durstring(s.duration)}")
         else:
             if s.duration <= 0:
                 raise Exception("zero length 'to' segment, contact developer")
             splicelines.append(f"file '{TEMPDIR}\\glue{i}{ext}'")
-            splicelines.append(f"duration {s.duration/framerate}")
+            splicelines.append(f"duration {durstring(s.duration)}")
 
     fileloc = f"{TEMPDIR}\\splice.txt"
     with open(fileloc, "w") as splicefile:
@@ -445,7 +454,6 @@ def steenbeck():
     command = [
         "./ffmpeg.exe",
         "-y",
-        reportflag,
         "-i", videofile,
         "-i", f"{TEMPDIR}\\{AUDIOBASE}{ext}",
         "-c", "copy",
