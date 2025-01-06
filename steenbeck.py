@@ -173,7 +173,7 @@ def steenbeck():
 
     # invoke ffmpeg to find out where the keyframes are
     command = [
-        "./ffprobe.exe",
+        "ffprobe",
         "-print_format", "json",
         "-select_streams", "v:0",
         "-show_streams",
@@ -336,7 +336,7 @@ def steenbeck():
     _, ext = os.path.splitext(args.f)
     basefile = f"{TEMPDIR}\\base{ext}"
     command = [
-        "./ffmpeg.exe",
+        "ffmpeg",
         "-y",
         "-i", args.f,
         "-c", "copy",
@@ -433,7 +433,7 @@ def steenbeck():
     # TODO(dmo): figure out if we can do this remux in one go
     videofile = f"{TEMPDIR}\\videoonly{ext}"
     command = [
-        "./ffmpeg.exe",
+        "ffmpeg",
         "-y",
         reportflag,
         "-safe", "0",
@@ -452,7 +452,7 @@ def steenbeck():
         outputfile = f"output-{now.strftime("%y%m%d-%H%M%S")}{ext}"
 
     command = [
-        "./ffmpeg.exe",
+        "ffmpeg",
         "-y",
         "-i", videofile,
         "-i", f"{TEMPDIR}\\{AUDIOBASE}{ext}",
