@@ -364,7 +364,6 @@ def steenbeck_inner(tempdir: str, args):
         "ExportVideo": False,
         "MarkIn": originalTimeline.GetStartFrame(),
         "MarkOut": originalTimeline.GetEndFrame(),
-        # TODO(dmo): figure out where to store this temporary file
         'TargetDir': tempdir,
         'CustomName': AUDIOBASE
     }
@@ -380,7 +379,6 @@ def steenbeck_inner(tempdir: str, args):
                 "ExportAudio": False,
                 "MarkIn": int(originalTimeline.GetStartFrame() + targetstart),
                 "MarkOut": int(originalTimeline.GetStartFrame() + (targetstart+s.duration)-1),
-                # TODO(dmo): figure out where to store this temporary file
                 'TargetDir': tempdir,
                 'CustomName': f'glue{i}'
             }
