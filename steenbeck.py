@@ -216,12 +216,12 @@ def steenbeck_inner(tempdir: str, args):
 
     def findprevKeyframe(packets, i):
         for j in reversed(range(i)):
-            if packets[j]["flags"] == "K__":
+            if "K" in packets[j]["flags"]:
                 return packets[j]
 
     def findnextKeyframe(packets, i):
         for j in range(i, len(packets)):
-            if packets[j]["flags"] == "K__":
+            if "K" in packets[j]["flags"]:
                 return packets[j]
 
         # reached the end of the packet stream. We can get here
