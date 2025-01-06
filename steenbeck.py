@@ -17,13 +17,11 @@ import marshal
 import os
 import fractions
 import math
+import tempfile
 from python_get_resolve import GetResolve
 
 
 def steenbeck():
-    # TODO(dmo): figure out what this temporary directory actually needs to be
-    TEMPDIR = 'C:\\Users\\danie\\Videos\\splicetests\\temporaries'
-
     parser = argparse.ArgumentParser()
     parser.add_argument('-t')
     parser.add_argument('-f')
@@ -31,9 +29,17 @@ def steenbeck():
     parser.add_argument('-renderpreset')
     parser.add_argument('-debuglogs', action='store_true')
     parser.add_argument('-debuguniquename', action='store_true')
-    parser.add_argument('-debugreport', action='store_true')
-
+    parser.add_argument("-debugleavetemps", action='store_true')
     args = parser.parse_args()
+
+    now = datetime.datetime.now()
+    prefix = f"steenbeck-{now.strftime("%y%m%d-%H%M%S")}-"
+    delete = not (args.debugleavetemps or args.debuguniquename)
+    with tempfile.TemporaryDirectory(prefix=prefix, delete=delete) as td:
+        steenbeck_inner(td, args)
+
+
+def steenbeck_inner(tempdir: str, args):
 
     def dumpsegments(msg, segs):
         if not args.debuglogs:
@@ -334,7 +340,7 @@ def steenbeck():
     # encounters audio packets and we're adding the audio
     # back later anyway
     _, ext = os.path.splitext(args.f)
-    basefile = f"{TEMPDIR}\\base{ext}"
+    basefile = f"base{ext}"
     command = [
         "ffmpeg",
         "-y",
@@ -343,7 +349,7 @@ def steenbeck():
         "-map", "0:v",
         basefile
     ]
-    res = subprocess.run(command)
+    res = subprocess.run(command, cwd=tempdir)
     if res.returncode != 0:
         raise Exception(f"failed audio strip")
 
@@ -359,7 +365,7 @@ def steenbeck():
         "MarkIn": originalTimeline.GetStartFrame(),
         "MarkOut": originalTimeline.GetEndFrame(),
         # TODO(dmo): figure out where to store this temporary file
-        'TargetDir': TEMPDIR,
+        'TargetDir': tempdir,
         'CustomName': AUDIOBASE
     }
     project.SetRenderSettings(audiorender)
@@ -375,7 +381,7 @@ def steenbeck():
                 "MarkIn": int(originalTimeline.GetStartFrame() + targetstart),
                 "MarkOut": int(originalTimeline.GetStartFrame() + (targetstart+s.duration)-1),
                 # TODO(dmo): figure out where to store this temporary file
-                'TargetDir': TEMPDIR,
+                'TargetDir': tempdir,
                 'CustomName': f'glue{i}'
             }
             project.LoadRenderPreset(args.renderpreset)
@@ -419,23 +425,19 @@ def steenbeck():
         else:
             if s.duration <= 0:
                 raise Exception("zero length 'to' segment, contact developer")
-            splicelines.append(f"file '{TEMPDIR}\\glue{i}{ext}'")
+            splicelines.append(f"file 'glue{i}{ext}'")
             splicelines.append(f"duration {durstring(s.duration)}")
 
-    fileloc = f"{TEMPDIR}\\splice.txt"
+    fileloc = os.path.join(tempdir, "splice.txt")
     with open(fileloc, "w") as splicefile:
         splicefile.write("\n".join(splicelines))
 
-    reportflag = None
-    if args.debugreport:
-        reportflag = "-report"
-
     # TODO(dmo): figure out if we can do this remux in one go
-    videofile = f"{TEMPDIR}\\videoonly{ext}"
+    videofile = f"videoonly{ext}"
     command = [
         "ffmpeg",
         "-y",
-        reportflag,
+        "-report",
         "-safe", "0",
         "-f", "concat",
         "-i", fileloc,
@@ -443,19 +445,19 @@ def steenbeck():
         "-map", "0:v:0",
         videofile
     ]
-    command = [i for i in command if i is not None]
-    res = subprocess.run(command)
+    res = subprocess.run(command, cwd=tempdir)
 
     outputfile = args.o
     if args.debuguniquename:
-        now = datetime.datetime.now()
-        outputfile = f"output-{now.strftime("%y%m%d-%H%M%S")}{ext}"
+        outputfile = os.path.join(tempdir, f"output{ext}")
+    else:
+        outputfile = os.path.abspath(outputfile)
 
     command = [
         "ffmpeg",
         "-y",
         "-i", videofile,
-        "-i", f"{TEMPDIR}\\{AUDIOBASE}{ext}",
+        "-i", f"{AUDIOBASE}{ext}",
         "-c", "copy",
         "-map", "0:v:0",
         "-map", "1",
@@ -464,8 +466,7 @@ def steenbeck():
         "-map", "-1:d",
         outputfile
     ]
-    command = [i for i in command if i is not None]
-    res = subprocess.run(command)
+    res = subprocess.run(command, cwd=tempdir)
 
 
 def calculateFrameSeq(timeline):
