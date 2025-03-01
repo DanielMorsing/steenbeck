@@ -1,0 +1,6 @@
+[project]
+name = "steenbeck"
+version = "0.1.0"
+description = "tool for splicing in insert shots"
+requires-python = ">=3.12"
+dependencies = []
